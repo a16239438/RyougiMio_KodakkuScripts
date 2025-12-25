@@ -8,13 +8,13 @@ using KodakkuAssist.Module.GameEvent;
 using KodakkuAssist.Module.Draw;
 using KodakkuAssist.Module.GameEvent.Struct;
 using Dalamud.Utility.Numerics;
-using Newtonsoft.Json;
+
 using KodakkuAssist.Data;
 using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "格莱杨拉波尔歼殛战 Hell on Rails(Extreme)", territorys: [1308], guid: "b9dfc210-add4-d464-3030-e9e294b384ff", version: "0.0.0.1", author: "RyougiMio", note: "Powered by A1")]
+    [ScriptType(name: "格莱杨拉波尔歼殛战 Hell on Rails(Extreme)", territorys: [1308], guid: "b9dfc210-add4-d464-3030-e9e294b384ff", version: "0.0.0.2", author: "RyougiMio", note: "Bug fix")]
     public class Script1308
     {
         // ==================== 用户设置区域 ====================
@@ -37,10 +37,11 @@ namespace RyougiMioScriptNamespace
         {
             // 重置变量
             phaseCount = 1;
-            skillCount = 1; // 重置计数器
+            skillCount = 0; // 重置计数器
+            skillCount1 = 0;
             accessory.Method.RemoveDraw(".*");
             
-            accessory.Log.Debug("Script 1308 Initialized.");
+            accessory.Method.SendChat("/e HoR(EX) Initialized.");
         }
 
         [ScriptMethod(name: "计数更新_45663/45664", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45663|45664)$"], userControl: false)]
@@ -382,7 +383,7 @@ namespace RyougiMioScriptNamespace
                 dp.Owner = @event.SourceId;    
                 dp.TargetObject = tankId;     
                 
-                dp.Color = new Vector4(1.0f, 1.0f, 0.0f, 0.2f); // 红色半透明
+                dp.Color = new Vector4(1.0f, 1.0f, 0.0f, 0.1f); // 红色半透明
                 
                 dp.Radian = float.Pi / 5.143f; // 22.5度
                 
@@ -456,7 +457,7 @@ namespace RyougiMioScriptNamespace
             dp.Name = $"LightningFlash_{@event.SourceId}_{@event.Id}"; 
             dp.Position = drawPos;
             dp.Color = DangerColor.V4; // 使用用户设置的危险色
-            dp.Scale = new Vector2(5.0f); // 半径 5
+            dp.Scale = new Vector2(4.0f); // 半径 5
             
             dp.Delay = 0; // 延时 3秒
             dp.DestoryAt = 3000; 
@@ -476,7 +477,7 @@ namespace RyougiMioScriptNamespace
           
             Vector3 rectOffset = new Vector3(0, 0, -10f);
 
-           
+           Vector4 blueColor = new Vector4(0.0f, 1.0f, 1.0f, 0.2f);
             var dp1 = accessory.Data.GetDefaultDrawProperties();
             dp1.Name = $"Headlight_High_{@event.SourceId}";
             dp1.Position = new Vector3(srcPos.X, 5.0f, srcPos.Z); 
@@ -498,7 +499,7 @@ namespace RyougiMioScriptNamespace
             dp2.Name = $"Headlight_Low_{@event.SourceId}";
             dp2.Position = new Vector3(srcPos.X, 0.0f, srcPos.Z); 
             dp2.Rotation = srcRot;
-            dp2.Color = accessory.Data.DefaultDangerColor;
+            dp2.Color = blueColor;
 
             dp2.Offset = rectOffset;
             
@@ -525,12 +526,12 @@ namespace RyougiMioScriptNamespace
             // 偏移量 (保持你的设置)
             Vector3 rectOffset = new Vector3(0, 0, -10f);
 
-       
+            Vector4 blueColor = new Vector4(0.0f, 1.0f, 1.0f, 0.2f);
             var dp1 = accessory.Data.GetDefaultDrawProperties();
             dp1.Name = $"Headlight_High_{@event.SourceId}";
             dp1.Position = new Vector3(srcPos.X, 0.0f, srcPos.Z); 
             dp1.Rotation = srcRot;
-            dp1.Color = accessory.Data.DefaultDangerColor;
+            dp1.Color = blueColor;
             
             dp1.Offset = rectOffset; 
             dp1.DestoryAt = 6700;
