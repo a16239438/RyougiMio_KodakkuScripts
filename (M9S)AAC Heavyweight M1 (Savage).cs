@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "0.0.0.1", author: "RyougiMio", note: "M9S Prediction，脚本同时在M9N/S中生效，注明TTS的机制仅有播报，注明猜测的机制纯主观臆测。")]
+    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "0.0.0.2", author: "RyougiMio", note: "M9S Prediction，脚本同时在M9N/S中生效，注明TTS的机制仅有播报，注明猜测的机制纯主观臆测。")]
     public class RyougiMio_1321
     {
         #region Settings
@@ -387,6 +387,8 @@ namespace RyougiMioScriptNamespace
                 accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
             }
         }
+        #endregion
+        #region 瞎猜环节
         [ScriptMethod(name: "以太流失_扇形（猜测）", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45969)$"])]
         public void Fan_45_AOE(Event @event, ScriptAccessory accessory)
         {
@@ -402,6 +404,66 @@ namespace RyougiMioScriptNamespace
             dp.DestoryAt = duration;         
             dp.ScaleMode = ScaleMode.ByTime;         
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dp);
+        }
+        [ScriptMethod(name: "嗜血抓挠（猜测）", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45980|45981|45989|45991)$"])]
+        public void M9S_Fan_Guess(Event @event, ScriptAccessory accessory)
+        {
+            var duration = int.Parse(@event["DurationMilliseconds"]);
+            if (!uint.TryParse(@event["ActionId"], out var aid)) return;
+            // 1. 定义角度
+            float angle = 0f;
+            string label = "";
+            // --- 30度组 ---
+            // 45989, 45991
+            if (aid == 45989 || aid == 45991)
+            {
+                angle = (float)Math.PI / 6;
+                label = "30度_抓挠";
+            }
+            // --- 45度组 ---
+            // 45980
+            else if (aid == 45980)
+            {
+                angle = (float)Math.PI / 4; // 45度
+                label = "45度_小扇形";
+            }
+            // --- 120度组 ---
+            // 45983 (以及可能的读条 45981)
+            else if (aid == 45981)
+            {
+                angle = (float)(2 * Math.PI / 3); // 120度
+                label = "120度_大扇形";
+            }
+            else
+            {
+                return;
+            }
+            // 2. 绘制
+            var dp = accessory.Data.GetDefaultDrawProperties();
+            dp.Name = $"嗜血抓挠_{aid}_{label}";      
+            dp.Position = @event.SourcePosition;
+            dp.Rotation = @event.SourceRotation;
+            dp.Owner = @event.SourceId;      
+            // X = 角度 (弧度), Y = 距离 (40米)
+            dp.Scale = new Vector2(angle, 40f);
+            
+            dp.Color = accessory.Data.DefaultDangerColor;
+            dp.DestoryAt = duration;
+            dp.ScaleMode = ScaleMode.ByTime;
+            
+            accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dp);
+        }
+        [ScriptMethod(name: "标记蝙蝠", eventType: EventTypeEnum.AddCombatant, eventCondition: ["DataId:regex:^(19502)$"])]
+        public void Mark_19502_Circle(Event @event, ScriptAccessory accessory)
+        {
+            var dp = accessory.Data.GetDefaultDrawProperties();
+            dp.Name = $"Mark_19502_{@event.SourceId}";          
+            dp.Owner = @event.SourceId;
+            dp.Scale = new Vector2(0.5f);         
+            dp.Color = accessory.Data.DefaultDangerColor;
+            dp.DestoryAt = 60000;
+            dp.ScaleMode = ScaleMode.None; 
+            accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
         }
 
         #endregion
