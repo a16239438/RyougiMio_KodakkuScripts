@@ -11,7 +11,7 @@
     {
     "Name": "(M9S)AAC Heavyweight M1 (Savage)",
     "Guid": "ced5c285-484c-4750-bc85-241e927848f1",
-    "Version": "0.0.0.1",
+    "Version": "0.0.0.2",
     "Author": "RyougiMio",
     "TerritoryIds": [1320,1321],
     "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/(M9S)AAC%20Heavyweight%20M1%20(Savage).cs",
@@ -19,6 +19,7 @@
   }
 
 ]
+
 
 
 
