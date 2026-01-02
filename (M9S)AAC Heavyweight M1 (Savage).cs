@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "0.0.0.1", author: "RyougiMio", note: "M9S Predict")]
+    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "0.0.0.1", author: "RyougiMio", note: "M9S Prediction，脚本同时在M9N/S中生效，注明TTS的机制仅有播报，注明猜测的机制纯主观臆测。")]
     public class RyougiMio_1321
     {
         #region Settings
