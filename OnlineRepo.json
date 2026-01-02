@@ -5,7 +5,7 @@
     "Version": "0.0.0.2",
     "Author": "RyougiMio",
     "TerritoryIds": [1308],
-    "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/refs/heads/main/%E6%A0%BC%E8%8E%B1%E6%9D%A8%E6%8B%89%E6%B3%A2%E5%B0%94%E6%AD%BC%E6%AE%9B%E6%88%98%20Hell%20on%20Rails(Extreme).cs",
+    "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/%E6%A0%BC%E8%8E%B1%E6%9D%A8%E6%8B%89%E6%B3%A2%E5%B0%94%E6%AD%BC%E6%AE%9B%E6%88%98%20Hell%20on%20Rails(Extreme).cs",
     "UpdateInfo": "Hell on Rails(Extreme) V0.2，Powered By A1，Bug fix"
   },
     {
@@ -14,11 +14,12 @@
     "Version": "0.0.0.1",
     "Author": "RyougiMio",
     "TerritoryIds": [1320,1321],
-    "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/refs/heads/main/(M9S)AAC%20Heavyweight%20M1%20(Savage).cs",
+    "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/(M9S)AAC%20Heavyweight%20M1%20(Savage).cs",
     "UpdateInfo": "AAC Heavyweight M1 (Savage)Prediction Ver，Powered By Gemini , feat.Small_miao & Cicero"
   }
 
 ]
+
 
 
 
