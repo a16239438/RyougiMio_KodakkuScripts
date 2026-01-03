@@ -25,10 +25,20 @@
     "TerritoryIds": [1322,1323],
     "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/(M10S)AAC%20Heavyweight%20M2%20(Savage).cs",
     "UpdateInfo": "AAC Heavyweight M2 (Savage)Prediction Ver，Powered By Gemini , feat.Small_miao & Cicero"
+  },
+  {
+    "Name": "(M11S)AAC Heavyweight M3 (Savage)",
+    "Guid": "725bcd38-1173-420e-a248-b3e11a1ff1b3",
+    "Version": "0.0.0.1",
+    "Author": "RyougiMio",
+    "TerritoryIds": [1324,1325],
+    "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/(M11S)AAC%20Heavyweight%20M3%20(Savage).cs",
+    "UpdateInfo": "AAC Heavyweight M3 (Savage)Prediction Ver，Powered By Gemini , feat.Small_miao & Cicero"
   }
 
 
 ]
+
 
 
 
