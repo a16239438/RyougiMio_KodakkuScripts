@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "0.0.0.4", author: "RyougiMio", note: "M9S Prediction，脚本同时在M9N/S中生效，注明TTS的机制仅有播报，注明猜测的机制纯主观臆测。")]
+    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "0.1.0.0", author: "RyougiMio", note: "M9S Prediction，脚本同时在M9N/S中生效，注明TTS的机制仅有播报，注明猜测的机制纯主观臆测。")]
     public class RyougiMio_1321
     {
         #region Settings
@@ -83,6 +83,16 @@ namespace RyougiMioScriptNamespace
         {
             QTTS("AOE");
             QText("AOE", 4700, true);
+        }
+        [ScriptMethod(name: "音速流散TTS", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45980)$"])]
+        public void AOE_Alert1(Event @event, ScriptAccessory accessory)
+        {
+            QTTS("分散");
+        }
+        [ScriptMethod(name: "音速集聚TTS", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45981)$"])]
+        public void AOE_Aler2t(Event @event, ScriptAccessory accessory)
+        {
+            QTTS("分摊");
         }
 
         [ScriptMethod(name: "硬核之声TTS", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45915|45951|45916|45952)$"])]
@@ -447,7 +457,7 @@ namespace RyougiMioScriptNamespace
         public void Straight_Entity_Spawn(Event @event, ScriptAccessory accessory)
         {
             if (!uint.TryParse(@event["DataId"], out var id)) return;
-            int duration = 60000;
+            int duration = 120000;
             float width = 0f;
             float length = 0f;
             if (id == 19189)
@@ -570,6 +580,63 @@ namespace RyougiMioScriptNamespace
             dp.DestoryAt = 60000;
             dp.ScaleMode = ScaleMode.None;
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
+        }
+        // 定义防抖变量
+        private long _lastTriggerTime_45989_Single = 0;
+
+        [ScriptMethod(name: "M11S：旋转扇形 (单向6连/随动)", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:45989"])]
+        public void RotateFan_Single_Sequence(Event @event, ScriptAccessory accessory)
+        {
+            // --- 基础参数 ---
+            Vector3 centerPos = @event.SourcePosition;
+            
+            // 【修正1】起始方向：使用读条者当前的面向 (SourceRotation)
+            float startAngle = @event.SourceRotation;
+
+            // 每一轮的旋转增量：22.5度 (Pi/8)
+            // 假设顺时针 (如方向反了请把下面计算的 + 改为 -)
+            float rotationStep = (float)(Math.PI / 8); 
+
+            // 扇形大小
+            float fanRadian = (float)(Math.PI / 6); // 30度
+            float fanRadius = 60f;
+
+            // 累积延迟
+            int currentDelay = 0;
+
+            // --- 循环：6轮 (第1轮~第6轮) ---
+            // 只保留时间维度的循环，不再画空间上的8方(交给8个读条来源各自处理)
+            for (int i = 0; i < 6; i++)
+            {
+                // 计算当前轮持续时间
+                int duration = (i == 0) ? 2700 : 2400;
+
+                // 计算当前轮的角度 (基础面向 + 轮次 * 22.5度)
+                float finalRot = startAngle + (i * rotationStep);
+
+                var dp = accessory.Data.GetDefaultDrawProperties();
+                
+                // 【关键命名】必须包含 SourceId，因为有8个怪同时读条，不能重名
+                dp.Name = $"RotFan_Single_{@event.SourceId}_{i}";
+                
+                dp.Position = centerPos;
+                dp.Rotation = finalRot;
+                
+                dp.Radian = fanRadian; // 30度
+                dp.Scale = new Vector2(fanRadius); // 60米
+                
+                dp.Color = accessory.Data.DefaultDangerColor;
+                
+                // 时序控制
+                dp.Delay = currentDelay;     // 这一轮什么时候开始
+                dp.DestoryAt = duration;     // 这一轮存在多久
+                dp.ScaleMode = ScaleMode.ByTime; // 渐变填充
+
+                accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dp);
+
+                // 累加延迟，让下一轮在这一轮结束后开始
+                currentDelay += duration;
+            }
         }
 
         #endregion
