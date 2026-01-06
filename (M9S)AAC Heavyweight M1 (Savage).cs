@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "0.0.0.2", author: "RyougiMio", note: "M9S Prediction，脚本同时在M9N/S中生效，注明TTS的机制仅有播报，注明猜测的机制纯主观臆测。")]
+    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "0.0.0.3", author: "RyougiMio", note: "M9S Prediction，脚本同时在M9N/S中生效，注明TTS的机制仅有播报，注明猜测的机制纯主观臆测。")]
     public class RyougiMio_1321
     {
         #region Settings
@@ -37,6 +37,7 @@ namespace RyougiMioScriptNamespace
         private ScriptAccessory _acc;
         private static long _chainsawTime = 0;
         private static int _chainsawDelay = 0;
+        private int _moonCount = 0;
 
         #endregion
 
@@ -48,10 +49,10 @@ namespace RyougiMioScriptNamespace
         private void QTTS(string text, int rate = 0)
         {
             if (!EnableTTS) return;
-            _acc.Method.TTS(text,rate);
+            _acc.Method.TTS(text, rate);
         }
         // 自定义文字提示方法：自动检查 EnableText 开关
-        private void QText(string text, int duration,  bool isWarning = false)
+        private void QText(string text, int duration, bool isWarning = false)
         {
             if (!EnableText) return;
             _acc.Method.TextInfo(text, duration, isWarning);
@@ -70,6 +71,7 @@ namespace RyougiMioScriptNamespace
             _acc = accessory;
             _chainsawTime = 0;
             _chainsawDelay = 0;
+            _moonCount = 0;
             accessory.Method.SendChat("/e M9S Initialized.");
         }
 
@@ -132,6 +134,7 @@ namespace RyougiMioScriptNamespace
             // 1. 获取时间
             var totalDuration = int.Parse(@event["DurationMilliseconds"]);
             if (!uint.TryParse(@event["ActionId"], out var aid)) return;
+
             // 2. ID 分组
             var leftSideIds = new HashSet<uint> { 45906, 45911, 45943, 45948 }; // 左组
             var secondHitIds = new HashSet<uint> { 45907, 45911, 45944, 45948 }; // 后手组
@@ -140,35 +143,60 @@ namespace RyougiMioScriptNamespace
                 { 45907, 45906 }, { 45911, 45910 },
                 { 45944, 45943 }, { 45948, 45947 }
             };
-            // 3. 基础参数
-            var drawPos = new Vector3(100f, 0f, 100f);
-            var srcRot = @event.SourceRotation;
+
             bool isLeft = leftSideIds.Contains(aid);
             bool isSecond = secondHitIds.Contains(aid);
+
+            // 【关键修改】计数逻辑：只有是第一刀的时候，才算作新的一次机制，计数+1
+
+                _moonCount++;
+            
+
+            // 3. 基础参数与位置判断
+            Vector3 drawPos;
+
+            // 【关键修改】如果是第3次或第4次，使用 SourcePosition；否则使用场地中心
+            if (_moonCount == 3 || _moonCount == 4)
+            {
+                drawPos = @event.SourcePosition;
+            }
+            else
+            {
+                drawPos = new Vector3(100f, 0f, 100f);
+            }
+
+            var srcRot = @event.SourceRotation;
             float width = 40f;
             float length = 40f;
+
             // 4. 角度旋转逻辑
             // 左组：转 90 度 (+PI/2)
             // 右组：转 -90 度 (-PI/2)
             float rotOffset = isLeft ? (MathF.PI / 2) : -(MathF.PI / 2);
             float finalRot = srcRot + rotOffset;
+
             // 5. 时间控制逻辑
             int delay = 0;
             int destory = totalDuration;
+            
             if (!isSecond)
             {
                 _moonPhaseDurations[aid] = totalDuration;
             }
             else
             {
-                var firstId = pairMap[aid];
-                var firstDuration = _moonPhaseDurations.ContainsKey(firstId) ? _moonPhaseDurations[firstId] : 5000;
-                delay = firstDuration;
-                destory = totalDuration - delay;
+                // 如果是第二刀，尝试获取第一刀的时长
+                if (pairMap.TryGetValue(aid, out var firstId))
+                {
+                    var firstDuration = _moonPhaseDurations.ContainsKey(firstId) ? _moonPhaseDurations[firstId] : 5000;
+                    delay = firstDuration;
+                    destory = totalDuration - delay;
+                }
             }
+
             // 6. 绘制
             var dp = accessory.Data.GetDefaultDrawProperties();
-            dp.Name = $"月之半相_{aid}";
+            dp.Name = $"月之半相_{aid}_{DateTime.Now.Ticks}"; // 加个时间戳防止重名
 
             dp.Position = drawPos;
             dp.Rotation = finalRot;
@@ -177,9 +205,8 @@ namespace RyougiMioScriptNamespace
             dp.Delay = delay;
             dp.DestoryAt = destory;
             dp.ScaleMode = ScaleMode.YByTime;
+            
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
-            //QTTS("r-l", 0);
-           //QText("r-l", 5000);
         }
         [ScriptMethod(name: "强化月之半相_左右刀", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45908|45909|45912|45913|45945|45946|45949|45950)$"])]
         public void Enhanced_Half_Moon(Event @event, ScriptAccessory accessory)
@@ -188,15 +215,15 @@ namespace RyougiMioScriptNamespace
             var totalDuration = int.Parse(@event["DurationMilliseconds"]);
             if (!uint.TryParse(@event["ActionId"], out var aid)) return;
             // 左组：转 +90 度
-            var leftSideIds = new HashSet<uint> { 45908, 45913, 45945, 45950 };     
+            var leftSideIds = new HashSet<uint> { 45908, 45913, 45945, 45950 };
             // 后手组：需要延迟显示 (Wait for First)
             var secondHitIds = new HashSet<uint> { 45909, 45913, 45946, 45950 };
             // 配对表：Key = 后手ID, Value = 先手ID
             var pairMap = new Dictionary<uint, uint>
             {
-                { 45909, 45908 }, 
+                { 45909, 45908 },
                 { 45913, 45912 },
-                { 45946, 45945 }, 
+                { 45946, 45945 },
                 { 45950, 45949 }
             };
 
@@ -208,7 +235,7 @@ namespace RyougiMioScriptNamespace
             // 基础参数
             var srcRot = @event.SourceRotation;
             bool isLeft = leftSideIds.Contains(aid);
-            bool isSecond = secondHitIds.Contains(aid);      
+            bool isSecond = secondHitIds.Contains(aid);
             float width = 40f;
             float length = 40f;
             // 4. 角度旋转逻辑
@@ -230,7 +257,7 @@ namespace RyougiMioScriptNamespace
                 if (pairMap.TryGetValue(aid, out var firstId))
                 {
                     // 尝试获取先手的时间，默认5000
-                    var firstDuration = _moonPhaseDurations.ContainsKey(firstId) ? _moonPhaseDurations[firstId] : 5000;                    
+                    var firstDuration = _moonPhaseDurations.ContainsKey(firstId) ? _moonPhaseDurations[firstId] : 5000;
                     delay = firstDuration;
                     destory = totalDuration - delay; // 保证同时结束
                 }
@@ -243,28 +270,107 @@ namespace RyougiMioScriptNamespace
             dp.Rotation = finalRot;
             dp.Scale = new Vector2(width, length);
             dp.Color = accessory.Data.DefaultDangerColor;
-            
+
             dp.Delay = delay;
             dp.DestoryAt = destory;
-            
+
             dp.ScaleMode = ScaleMode.YByTime;
-            
+
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
         }
         #endregion
         #region 蝙蝠机制
-        [ScriptMethod(name: "血魅的靴踏音", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45899|45940)$"])]
-        public void Vamp_Stomp(Event @event, ScriptAccessory accessory)
+        [ScriptMethod(name: "蝙蝠", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:45940"])]
+        public void Bat_Bind_Circle_Logic(Event @event, ScriptAccessory accessory)
         {
-            var duration = int.Parse(@event["DurationMilliseconds"]);
+            var bats = accessory.Data.Objects.Where(obj => obj.DataId == 19503);
+            var center = new Vector3(100f, 0, 100f);
+
+            foreach (var bat in bats)
+            {
+                // 1. 距离判断 (用于决定谁先显示)
+                // 依然需要算一下距离来决定Delay
+                double distToCenter = Math.Sqrt(Math.Pow(bat.Position.X - center.X, 2) + Math.Pow(bat.Position.Z - center.Z, 2));
+                
+                int delay = 0;
+                int duration = 0;
+
+                if (distToCenter > 5 && distToCenter < 10)
+                {
+                    delay = 0; duration = 8200;
+                }
+                else if (distToCenter >= 10 && distToCenter < 15)
+                {
+                    delay = 8200; duration = 3500;
+                }
+                else if (distToCenter >= 15 && distToCenter < 30)
+                {
+                    delay = 11700; duration = 3500;
+                }
+                else continue;
+
+                // 2. 绘图
+                var dp = accessory.Data.GetDefaultDrawProperties();
+                dp.Name = $"Bat_Bind_{bat.EntityId}_{DateTime.Now.Ticks}";
+                
+                // 【核心修改】直接绑定，不再瞎算坐标
+                dp.Owner = bat.EntityId; 
+                
+                dp.Scale = new Vector2(8f); 
+                dp.Color = accessory.Data.DefaultDangerColor;
+                
+                dp.Delay = delay;
+                dp.DestoryAt = duration;
+                dp.ScaleMode = ScaleMode.ByTime; // 渐变填充
+
+                accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
+            }
+        }
+        // 1. 获得Buff：画圈 (持续时间设为无限，名字固定)
+        [ScriptMethod(name: "蝙蝠BUFF", eventType: EventTypeEnum.StatusAdd, eventCondition: ["StatusID:4729"])]
+        public void Status_4729_Add(Event @event, ScriptAccessory accessory)
+        {
+            var tidStr = @event["TargetId"];
+            if (!ulong.TryParse(tidStr, System.Globalization.NumberStyles.HexNumber, null, out var tid)) 
+            {
+                if (!ulong.TryParse(tidStr, out tid)) return;
+            }
+
             var dp = accessory.Data.GetDefaultDrawProperties();
-            dp.Name = "血魅的靴踏音";
-            dp.Position = new Vector3(100f, 0f, 100f);
-            dp.Scale = new Vector2(10f);
+            
+            // 【关键】使用固定的命名规则，不加 DateTime.Ticks
+            // 这样在移除的时候才能找到它
+            dp.Name = $"Buff_4729_Ring_{tid}";
+            
+            dp.Owner = tid;
             dp.Color = accessory.Data.DefaultDangerColor;
-            dp.DestoryAt = duration;
-            dp.ScaleMode = ScaleMode.ByTime;
-            accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
+            
+            // 【关键】设置一个极长的持续时间 (比如 10分钟)，等待 Remove 事件来手动清除
+            dp.DestoryAt = 600000; 
+            
+            // 空心月环
+            dp.Scale = new Vector2(8.0f);      
+            dp.InnerScale = new Vector2(7.8f); 
+            dp.Radian = float.Pi * 2; 
+
+            accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Donut, dp);
+        }
+
+        // 2. 移除Buff：删除圈
+        [ScriptMethod(name: "蝙蝠BUFF2", eventType: EventTypeEnum.StatusRemove, eventCondition: ["StatusID:4729"])]
+        public void Status_4729_Remove(Event @event, ScriptAccessory accessory)
+        {
+            var tidStr = @event["TargetId"];
+            if (!ulong.TryParse(tidStr, System.Globalization.NumberStyles.HexNumber, null, out var tid)) 
+            {
+                if (!ulong.TryParse(tidStr, out tid)) return;
+            }
+
+            // 拼出和 Add 时候一样的名字
+            string drawName = $"Buff_4729_Ring_{tid}";
+            
+            // 手动删除
+            accessory.Method.RemoveDraw(drawName);
         }
 
         #endregion
@@ -301,13 +407,13 @@ namespace RyougiMioScriptNamespace
             if (aid == 45880 || aid == 45930) length = 12f;
             // 2. 时间逻辑
             long now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            long diff = now - _chainsawTime;     
+            long diff = now - _chainsawTime;
             int finalDelay = 0;
             int finalDuration = duration;
             // 情况A: 初始化 或 间隔太久(>5s) -> 新的一轮机制
             if (_chainsawTime == 0 || Math.Abs(diff) > 5000)
             {
-                finalDelay = 0;         
+                finalDelay = 0;
                 _chainsawDelay = 0;
                 _chainsawTime = now;
             }
@@ -315,15 +421,15 @@ namespace RyougiMioScriptNamespace
             else if (diff < 1000)
             {
                 finalDelay = _chainsawDelay;
-                finalDuration =duration-_chainsawDelay;
+                finalDuration = duration - _chainsawDelay;
             }
             // 情况C: 时差 > 1s -> 连续波次 (第二波、第三波...)
             else
             {
                 finalDelay = duration - (int)diff;
                 finalDuration = (int)diff;
-                _chainsawDelay = finalDelay; 
-                _chainsawTime = now;         
+                _chainsawDelay = finalDelay;
+                _chainsawTime = now;
             }
             // 3. 绘制
             var dp = accessory.Data.GetDefaultDrawProperties();
@@ -331,9 +437,9 @@ namespace RyougiMioScriptNamespace
             dp.Position = @event.SourcePosition;
             dp.Rotation = @event.SourceRotation;
             dp.Scale = new Vector2(5f, length);
-            dp.Color = accessory.Data.DefaultDangerColor;           
+            dp.Color = accessory.Data.DefaultDangerColor;
             dp.Delay = finalDelay;
-            dp.DestoryAt = finalDuration;         
+            dp.DestoryAt = finalDuration;
             dp.ScaleMode = ScaleMode.YByTime;
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
         }
@@ -341,7 +447,7 @@ namespace RyougiMioScriptNamespace
         public void Straight_Entity_Spawn(Event @event, ScriptAccessory accessory)
         {
             if (!uint.TryParse(@event["DataId"], out var id)) return;
-            int duration = 60000; 
+            int duration = 60000;
             float width = 0f;
             float length = 0f;
             if (id == 19173)
@@ -361,7 +467,7 @@ namespace RyougiMioScriptNamespace
             dp.Scale = new Vector2(width, length);
             dp.Color = accessory.Data.DefaultDangerColor;
             dp.DestoryAt = duration;
-            dp.ScaleMode = ScaleMode.None; 
+            dp.ScaleMode = ScaleMode.None;
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Straight, dp);
         }
         #endregion
@@ -378,12 +484,12 @@ namespace RyougiMioScriptNamespace
             {
                 var dp = accessory.Data.GetDefaultDrawProperties();
                 dp.Name = $"以太流失_{aid}_{i}";
-                dp.Position = @event.SourcePosition;           
+                dp.Position = @event.SourcePosition;
                 dp.Rotation = @event.SourceRotation + (float)(Math.PI / 2 * i);
-                dp.Scale = new Vector2(width, radius);                
+                dp.Scale = new Vector2(width, radius);
                 dp.Color = accessory.Data.DefaultDangerColor;
                 dp.DestoryAt = duration;
-                dp.ScaleMode = ScaleMode.YByTime;             
+                dp.ScaleMode = ScaleMode.YByTime;
                 accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
             }
         }
@@ -392,17 +498,17 @@ namespace RyougiMioScriptNamespace
         [ScriptMethod(name: "以太流失_扇形（猜测）", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45969)$"])]
         public void Fan_45_AOE(Event @event, ScriptAccessory accessory)
         {
-            var duration = int.Parse(@event["DurationMilliseconds"]);          
+            var duration = int.Parse(@event["DurationMilliseconds"]);
             var dp = accessory.Data.GetDefaultDrawProperties();
-            dp.Name = "以太流失_扇形";     
+            dp.Name = "以太流失_扇形";
             dp.Position = @event.SourcePosition;
-            dp.Rotation = @event.SourceRotation;            
+            dp.Rotation = @event.SourceRotation;
             // Scale.X = 弧度 (45度 = PI/4)
             // Scale.Y = 半径 (40米)
-            dp.Scale = new Vector2((float)Math.PI / 4, 40f);            
+            dp.Scale = new Vector2((float)Math.PI / 4, 40f);
             dp.Color = accessory.Data.DefaultDangerColor;
-            dp.DestoryAt = duration;         
-            dp.ScaleMode = ScaleMode.ByTime;         
+            dp.DestoryAt = duration;
+            dp.ScaleMode = ScaleMode.ByTime;
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dp);
         }
         [ScriptMethod(name: "嗜血抓挠（猜测）", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45980|45981|45989|45991)$"])]
@@ -440,29 +546,29 @@ namespace RyougiMioScriptNamespace
             }
             // 2. 绘制
             var dp = accessory.Data.GetDefaultDrawProperties();
-            dp.Name = $"嗜血抓挠_{aid}_{label}";      
+            dp.Name = $"嗜血抓挠_{aid}_{label}";
             dp.Position = @event.SourcePosition;
             dp.Rotation = @event.SourceRotation;
-            dp.Owner = @event.SourceId;      
+            dp.Owner = @event.SourceId;
             // X = 角度 (弧度), Y = 距离 (40米)
             dp.Scale = new Vector2(angle, 40f);
-            
+
             dp.Color = accessory.Data.DefaultDangerColor;
             dp.DestoryAt = duration;
             dp.ScaleMode = ScaleMode.ByTime;
-            
+
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dp);
         }
         [ScriptMethod(name: "标记蝙蝠", eventType: EventTypeEnum.AddCombatant, eventCondition: ["DataId:regex:^(19502)$"])]
         public void Mark_19502_Circle(Event @event, ScriptAccessory accessory)
         {
             var dp = accessory.Data.GetDefaultDrawProperties();
-            dp.Name = $"Mark_19502_{@event.SourceId}";          
+            dp.Name = $"Mark_19502_{@event.SourceId}";
             dp.Owner = @event.SourceId;
-            dp.Scale = new Vector2(0.5f);         
+            dp.Scale = new Vector2(0.5f);
             dp.Color = accessory.Data.DefaultDangerColor;
             dp.DestoryAt = 60000;
-            dp.ScaleMode = ScaleMode.None; 
+            dp.ScaleMode = ScaleMode.None;
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
         }
 
