@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "0.0.0.3", author: "RyougiMio", note: "M9S Prediction，脚本同时在M9N/S中生效，注明TTS的机制仅有播报，注明猜测的机制纯主观臆测。")]
+    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "0.0.0.4", author: "RyougiMio", note: "M9S Prediction，脚本同时在M9N/S中生效，注明TTS的机制仅有播报，注明猜测的机制纯主观臆测。")]
     public class RyougiMio_1321
     {
         #region Settings
@@ -443,19 +443,19 @@ namespace RyougiMioScriptNamespace
             dp.ScaleMode = ScaleMode.YByTime;
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
         }
-        [ScriptMethod(name: "致命刑轮锯", eventType: EventTypeEnum.AddCombatant, eventCondition: ["DataId:regex:^(19173|19174)$"])]
+        [ScriptMethod(name: "致命刑轮锯", eventType: EventTypeEnum.AddCombatant, eventCondition: ["DataId:regex:^(19189|19190)$"])]
         public void Straight_Entity_Spawn(Event @event, ScriptAccessory accessory)
         {
             if (!uint.TryParse(@event["DataId"], out var id)) return;
             int duration = 60000;
             float width = 0f;
             float length = 0f;
-            if (id == 19173)
+            if (id == 19189)
             {
                 width = 6f;
                 length = 8f;
             }
-            else if (id == 19174)
+            else if (id == 19190)
             {
                 width = 12f;
                 length = 5f;
@@ -477,7 +477,7 @@ namespace RyougiMioScriptNamespace
         {
             var duration = int.Parse(@event["DurationMilliseconds"]);
             if (!uint.TryParse(@event["ActionId"], out var aid)) return;
-            float radius = 20f;
+            float radius = 40f;
             float width = (aid == 45971) ? 10f : 6f;
             // 2. 循环 4 次，画 4 个方向
             for (int i = 0; i < 4; i++)
