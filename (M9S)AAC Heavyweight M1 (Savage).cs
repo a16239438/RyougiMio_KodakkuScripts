@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "0.1.0.0", author: "RyougiMio", note: "M9S Prediction，脚本同时在M9N/S中生效，注明TTS的机制仅有播报，注明猜测的机制纯主观臆测。")]
+    [ScriptType(name: "(M9S)AAC Heavyweight M1 (Savage)", territorys: [1320, 1321], guid: "ced5c285-484c-4750-bc85-241e927848f1", version: "1.0.0.0", author: "RyougiMio", note: "M9S，脚本同时在M9N/S中生效，注明TTS的机制仅有播报。")]
     public class RyougiMio_1321
     {
         #region Settings
@@ -38,6 +38,11 @@ namespace RyougiMioScriptNamespace
         private static long _chainsawTime = 0;
         private static int _chainsawDelay = 0;
         private int _moonCount = 0;
+        // 【修正】45969 扇形多组控制
+        private static int _fan45969Count = 0;      
+        private static long _fan45969LastTime = 0;
+        // 用字典记录每一组(GroupIndex)的预计结束时间
+        private static Dictionary<int, long> _fanGroupEndTimes = new Dictionary<int, long>();
 
         #endregion
 
@@ -45,6 +50,8 @@ namespace RyougiMioScriptNamespace
 
         // 静态字典：用来跨方法记录第一刀的时间
         private static Dictionary<uint, int> _moonPhaseDurations = new Dictionary<uint, int>();
+        // 【新增】定义一个集合，用来记录当前场上所有有BUFF 4729 的玩家ID
+        private HashSet<uint> _active4729Tids = new HashSet<uint>();
         // 自定义TTS方法：自动检查 EnableTTS 开关
         private void QTTS(string text, int rate = 0)
         {
@@ -72,6 +79,10 @@ namespace RyougiMioScriptNamespace
             _chainsawTime = 0;
             _chainsawDelay = 0;
             _moonCount = 0;
+            // 【修正】重置
+            _fan45969Count = 0;
+            _fan45969LastTime = 0;
+            _fanGroupEndTimes.Clear();
             accessory.Method.SendChat("/e M9S Initialized.");
         }
 
@@ -291,47 +302,81 @@ namespace RyougiMioScriptNamespace
         #endregion
         #region 蝙蝠机制
         [ScriptMethod(name: "蝙蝠", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:45940"])]
-        public void Bat_Bind_Circle_Logic(Event @event, ScriptAccessory accessory)
+        public void Bat_Auto_Rotate_Direction(Event @event, ScriptAccessory accessory)
         {
             var bats = accessory.Data.Objects.Where(obj => obj.DataId == 19503);
             var center = new Vector3(100f, 0, 100f);
 
             foreach (var bat in bats)
             {
-                // 1. 距离判断 (用于决定谁先显示)
-                // 依然需要算一下距离来决定Delay
-                double distToCenter = Math.Sqrt(Math.Pow(bat.Position.X - center.X, 2) + Math.Pow(bat.Position.Z - center.Z, 2));
+                var batPos = bat.Position;
+                var batRot = bat.Rotation;
+
+                // --- 2. 基础向量计算 ---
+                // 半径向量：从中心指向蝙蝠
+                Vector3 vecRadius = batPos - center;
+                double dist = vecRadius.Length();
+
+                // 蝙蝠的朝向向量
+                Vector3 vecBatFace = new Vector3((float)Math.Sin(batRot), 0, (float)Math.Cos(batRot));
+
+                // --- 3. 核心：计算两个候选点 (顺时针 vs 逆时针) ---
                 
+                // 候选点 A (顺时针旋转 90度): (z, -x)
+                Vector3 vecCW = new Vector3(vecRadius.Z, 0, -vecRadius.X);
+                
+                // 候选点 B (逆时针旋转 90度): (-z, x)
+                Vector3 vecCCW = new Vector3(-vecRadius.Z, 0, vecRadius.X);
+
+                // --- 4. 决策：选哪一个？ ---
+                // 计算点乘：如果 (向量A 与 蝙蝠朝向) 的夹角更小，点乘结果就越大
+                // 意思是：蝙蝠脸朝向哪边，我们就往哪边转
+                
+                Vector3 finalVec;
+                if (Vector3.Dot(vecCW, vecBatFace) > Vector3.Dot(vecCCW, vecBatFace))
+                {
+                    finalVec = vecCW; // 蝙蝠是顺时针跑的，选顺时针点
+                }
+                else
+                {
+                    finalVec = vecCCW; // 蝙蝠是逆时针跑的，选逆时针点
+                }
+
+                // 计算最终圆心坐标 = 中心 + 旋转后的向量
+                Vector3 drawPos = center + finalVec;
+
+
+                // --- 5. 时序逻辑 (保持不变) ---
                 int delay = 0;
                 int duration = 0;
 
-                if (distToCenter > 5 && distToCenter < 10)
+                if (dist > 5 && dist < 10)
                 {
                     delay = 0; duration = 8200;
                 }
-                else if (distToCenter >= 10 && distToCenter < 15)
+                else if (dist >= 10 && dist < 15)
                 {
                     delay = 8200; duration = 3500;
                 }
-                else if (distToCenter >= 15 && distToCenter < 30)
+                else if (dist >= 15 && dist < 30)
                 {
                     delay = 11700; duration = 3500;
                 }
                 else continue;
 
-                // 2. 绘图
+                // --- 6. 绘图 ---
                 var dp = accessory.Data.GetDefaultDrawProperties();
-                dp.Name = $"Bat_Bind_{bat.EntityId}_{DateTime.Now.Ticks}";
+                dp.Name = $"Bat_SmartRot_{bat.EntityId}_{DateTime.Now.Ticks}";
                 
-                // 【核心修改】直接绑定，不再瞎算坐标
-                dp.Owner = bat.EntityId; 
+                dp.Owner = 0; // 不绑定
+                dp.Position = drawPos; // 修正后的位置
                 
                 dp.Scale = new Vector2(8f); 
                 dp.Color = accessory.Data.DefaultDangerColor;
                 
                 dp.Delay = delay;
                 dp.DestoryAt = duration;
-                dp.ScaleMode = ScaleMode.ByTime; // 渐变填充
+                dp.ScaleMode = ScaleMode.ByTime;
 
                 accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
             }
@@ -348,19 +393,15 @@ namespace RyougiMioScriptNamespace
 
             var dp = accessory.Data.GetDefaultDrawProperties();
             
-            // 【关键】使用固定的命名规则，不加 DateTime.Ticks
-            // 这样在移除的时候才能找到它
             dp.Name = $"Buff_4729_Ring_{tid}";
             
             dp.Owner = tid;
             dp.Color = accessory.Data.DefaultDangerColor;
-            
-            // 【关键】设置一个极长的持续时间 (比如 10分钟)，等待 Remove 事件来手动清除
             dp.DestoryAt = 600000; 
             
             // 空心月环
             dp.Scale = new Vector2(8.0f);      
-            dp.InnerScale = new Vector2(7.8f); 
+            dp.InnerScale = new Vector2(7.95f); 
             dp.Radian = float.Pi * 2; 
 
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Donut, dp);
@@ -505,70 +546,8 @@ namespace RyougiMioScriptNamespace
         }
         #endregion
         #region 瞎猜环节
-        [ScriptMethod(name: "以太流失_扇形（猜测）", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45969)$"])]
-        public void Fan_45_AOE(Event @event, ScriptAccessory accessory)
-        {
-            var duration = int.Parse(@event["DurationMilliseconds"]);
-            var dp = accessory.Data.GetDefaultDrawProperties();
-            dp.Name = "以太流失_扇形";
-            dp.Position = @event.SourcePosition;
-            dp.Rotation = @event.SourceRotation;
-            // Scale.X = 弧度 (45度 = PI/4)
-            // Scale.Y = 半径 (40米)
-            dp.Scale = new Vector2((float)Math.PI / 4, 40f);
-            dp.Color = accessory.Data.DefaultDangerColor;
-            dp.DestoryAt = duration;
-            dp.ScaleMode = ScaleMode.ByTime;
-            accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dp);
-        }
-        [ScriptMethod(name: "嗜血抓挠（猜测）", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45980|45981|45989|45991)$"])]
-        public void M9S_Fan_Guess(Event @event, ScriptAccessory accessory)
-        {
-            var duration = int.Parse(@event["DurationMilliseconds"]);
-            if (!uint.TryParse(@event["ActionId"], out var aid)) return;
-            // 1. 定义角度
-            float angle = 0f;
-            string label = "";
-            // --- 30度组 ---
-            // 45989, 45991
-            if (aid == 45989 || aid == 45991)
-            {
-                angle = (float)Math.PI / 6;
-                label = "30度_抓挠";
-            }
-            // --- 45度组 ---
-            // 45980
-            else if (aid == 45980)
-            {
-                angle = (float)Math.PI / 4; // 45度
-                label = "45度_小扇形";
-            }
-            // --- 120度组 ---
-            // 45983 (以及可能的读条 45981)
-            else if (aid == 45981)
-            {
-                angle = (float)(2 * Math.PI / 3); // 120度
-                label = "120度_大扇形";
-            }
-            else
-            {
-                return;
-            }
-            // 2. 绘制
-            var dp = accessory.Data.GetDefaultDrawProperties();
-            dp.Name = $"嗜血抓挠_{aid}_{label}";
-            dp.Position = @event.SourcePosition;
-            dp.Rotation = @event.SourceRotation;
-            dp.Owner = @event.SourceId;
-            // X = 角度 (弧度), Y = 距离 (40米)
-            dp.Scale = new Vector2(angle, 40f);
 
-            dp.Color = accessory.Data.DefaultDangerColor;
-            dp.DestoryAt = duration;
-            dp.ScaleMode = ScaleMode.ByTime;
-
-            accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dp);
-        }
+ 
         [ScriptMethod(name: "标记蝙蝠", eventType: EventTypeEnum.AddCombatant, eventCondition: ["DataId:regex:^(19502)$"])]
         public void Mark_19502_Circle(Event @event, ScriptAccessory accessory)
         {
@@ -638,7 +617,294 @@ namespace RyougiMioScriptNamespace
                 currentDelay += duration;
             }
         }
+        [ScriptMethod(name: "硬核之声", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:45951"])]
+        public void Circle_Target_6m(Event @event, ScriptAccessory accessory)
+        {
+            // --- 1. 获取时间 ---
+            if (!int.TryParse(@event["DurationMilliseconds"], out var dur)) return;
 
+            // --- 2. 获取目标 (TargetId) ---
+            var tidStr = @event["TargetId"];
+            if (string.IsNullOrEmpty(tidStr) || 
+                !ulong.TryParse(tidStr.Replace("0x", ""), System.Globalization.NumberStyles.HexNumber, null, out var tid)) 
+                return;
+
+            // --- 3. 绘图 ---
+            var dp = accessory.Data.GetDefaultDrawProperties();
+            dp.Name = $"Circle_6m_{tid}_{DateTime.Now.Ticks}";
+            
+            dp.Owner = tid; // 跟随目标
+            dp.Scale = new Vector2(6f); // 半径 6m
+            dp.Color = accessory.Data.DefaultDangerColor;
+            dp.DestoryAt = dur;
+            dp.ScaleMode = ScaleMode.ByTime; // 渐变
+
+            accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
+        }
+
+        [ScriptMethod(name: "强化硬核之声", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:45952"])]
+        public void Circle_15m(Event @event, ScriptAccessory accessory)
+        {
+            // --- 1. 获取时间 ---
+            if (!int.TryParse(@event["DurationMilliseconds"], out var dur)) return;
+
+            // --- 2. 绘图 ---
+            var dp = accessory.Data.GetDefaultDrawProperties();
+            dp.Name = $"Circle_15m_{@event.SourceId}_{DateTime.Now.Ticks}";
+            
+            // 45952 通常是 Boss 自身释放的 AOE，所以用 SourcePosition
+            // 如果它也是点名，改用 dp.Owner = TargetId 即可
+            dp.Position = @event.SourcePosition;
+            
+            dp.Scale = new Vector2(15f); // 半径 15m
+            dp.Color = accessory.Data.DefaultDangerColor;
+            dp.DestoryAt = dur;
+            dp.ScaleMode = ScaleMode.ByTime; // 渐变
+
+            accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
+        }
+        [ScriptMethod(name: "以太流失_扇形", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:45969"])]
+        public void Fan_45_AOE(Event @event, ScriptAccessory accessory)
+        {
+            var duration = int.Parse(@event["DurationMilliseconds"]);
+            long now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+
+            // 1. 计数器重置逻辑 (防止灭团后计数不对)
+            // 如果距离上次读条超过15秒，视为新的一轮
+            if (now - _fan45969LastTime > 15000)
+            {
+                _fan45969Count = 0;
+                _fanGroupEndTimes.Clear();
+            }
+            _fan45969LastTime = now;
+            
+            // 计数 +1
+            _fan45969Count++;
+
+            // 2. 组别计算
+            // 1, 2 -> Group 0 (第一组)
+            // 3, 4 -> Group 1 (第二组)
+            // 5, 6 -> Group 2 (第三组) ...
+            int groupIndex = (_fan45969Count - 1) / 2;
+
+            // 3. 记录这一组的【绝对结束时间】
+            long myEndTime = now + duration;
+            if (!_fanGroupEndTimes.ContainsKey(groupIndex) || myEndTime > _fanGroupEndTimes[groupIndex])
+            {
+                _fanGroupEndTimes[groupIndex] = myEndTime;
+            }
+
+            // 4. 计算延迟
+            int delay = 0;
+            if (groupIndex > 0)
+            {
+                // 如果不是第一组，需要查上一组的结束时间
+                if (_fanGroupEndTimes.TryGetValue(groupIndex - 1, out long prevEndTime))
+                {
+                    delay = (int)Math.Max(0, prevEndTime - now);
+                }
+            }
+
+            // 5. 计算剩余显示的持续时间 (Duration - Delay)
+            int finalDuration = duration - delay;
+            if (finalDuration <= 0) finalDuration = 100;
+
+            // 6. 绘图
+            var dp = accessory.Data.GetDefaultDrawProperties();
+            
+            // 【关键修改】名字加上 Ticks，保证绝对不会因为重名而“只画一个”
+            dp.Name = $"Fan45_{@event.SourceId}_{_fan45969Count}_{DateTime.Now.Ticks}";
+            
+            dp.Position = @event.SourcePosition;
+            dp.Rotation = @event.SourceRotation;
+            
+            // 45度扇形 (X=半径60, Y=角度PI/4)
+            // 注意：你的框架好像是用 Scale.Y 来表示角度，Scale.X 表示半径
+            // 请根据你之前给的正确范例：Radian=角度，Scale=半径
+            dp.Radian = (float)Math.PI / 4;  // 45度
+            dp.Scale = new Vector2(60f);     // 半径60
+
+            dp.Color = accessory.Data.DefaultDangerColor;
+            
+            dp.Delay = delay;
+            dp.DestoryAt = finalDuration;
+            dp.ScaleMode = ScaleMode.ByTime;
+
+            accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dp);
+        }
+        [ScriptMethod(name: "音速", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(45980|45981)$"])]
+        public void Dual_Spell_Mechanic(Event @event, ScriptAccessory accessory)
+        {
+            if (!uint.TryParse(@event["ActionId"], out var aid)) return;
+            var duration = int.Parse(@event["DurationMilliseconds"]);
+            
+            // 1. 获取自己的ID
+            uint myId = accessory.Data.Me;
+            var partyIds = accessory.Data.PartyList;
+            
+            // 2. 预先检查“自己”是否有 4730 BUFF (这对分摊逻辑很重要)
+            bool iHave4730 = false;
+            var myObj = accessory.Data.Objects.FirstOrDefault(x => x.EntityId == myId);
+            if (myObj is IBattleChara me)
+            {
+                iHave4730 = me.StatusList.Any(s => s.StatusId == 4730);
+            }
+
+            // 3. 确定自己的职能索引 (用于分散时的颜色判断)
+            int myIndex = -1;
+            for (int i = 0; i < partyIds.Count; i++)
+            {
+                if (partyIds[i] == myId)
+                {
+                    myIndex = i;
+                    break;
+                }
+            }
+
+            // 4. 定义弧度常量
+            float rad100 = 100f * (float.Pi / 180f); 
+            float rad45 = float.Pi / 4;          
+            
+            // 5. 遍历小队列表
+            for (int i = 0; i < partyIds.Count; i++)
+            {
+                var tid = partyIds[i];
+                var obj = accessory.Data.Objects.FirstOrDefault(x => x.EntityId == tid);
+                
+                if (obj is IBattleChara player)
+                {
+                    // --- 【规则1】全局过滤：如果目标玩家有 4730，直接不画 ---
+                    bool targetHas4730 = player.StatusList.Any(s => s.StatusId == 4730);
+                    if (targetHas4730) continue;
+
+                    // 判断是否是“我”
+                    bool isMe = (i == myIndex);
+
+                    // --- 【规则2】分摊逻辑控制 ---
+                    if (aid == 45981)
+                    {
+                        // 如果“不是我” 且 “我自己没有4730”，则跳过不画
+                        // 意思是：只有当我有了4730，我才看得到别人的圈；否则我只看我自己的
+                        if (!isMe && !iHave4730) continue;
+                    }
+
+                    // --- 角度逻辑 ---
+                    float angle = 0f;
+                    if (aid == 45980) 
+                    {
+                        // 45980 (分散): T(0,1) 100度, 其他 45度
+                        bool isTank = (i == 0 || i == 1); 
+                        angle = isTank ? rad100 : rad45;
+                    }
+                    else
+                    {
+                        // 45981 (分摊): 全员 100度
+                        angle = rad100;
+                    }
+
+                    // --- 颜色逻辑 ---
+                    var drawColor = accessory.Data.DefaultDangerColor; // 默认红
+
+                    if (aid == 45980) // 分散
+                    {
+                        // 如果我是 D (索引>=4)，看其他的 D (索引>=4) 为绿色
+                        if (myIndex >= 4)
+                        {
+                            if (i >= 4 && !isMe)
+                            {
+                                drawColor = accessory.Data.DefaultSafeColor;
+                            }
+                        }
+                    }
+                    else // 分摊
+                    {
+                        // 如果画出来的不是我 (能进来说明我有4730)，画绿色
+                        if (!isMe)
+                        {
+                            drawColor = accessory.Data.DefaultSafeColor;
+                        }
+                    }
+
+                    // --- 绘图 ---
+                    var dp = accessory.Data.GetDefaultDrawProperties();
+                    dp.Name = $"DualSpell_{aid}_{player.EntityId}"; 
+                    
+                    // 【关键】原点 Boss，目标 玩家
+                    dp.Owner = @event.SourceId; 
+                    dp.TargetObject = player.EntityId; 
+                    
+                    dp.Radian = angle;           
+                    dp.Scale = new Vector2(60f); 
+                    
+                    dp.Color = drawColor;
+                    dp.DestoryAt = duration;
+                    dp.ScaleMode = ScaleMode.ByTime;
+
+                    accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dp);
+                }
+            }
+        }
+        [ScriptMethod(name: "Status2056绘图", eventType: EventTypeEnum.StatusAdd, eventCondition: ["StatusID:2056"])]
+        public void Status_2056_Add(Event @event, ScriptAccessory accessory)
+        {
+            // 1. 获取 StackCount (Buff层数)
+            if (!int.TryParse(@event["StackCount"], out var stack)) return;
+            
+            // 2. 获取 TargetId (目标ID)
+            var tidStr = @event["TargetId"];
+            // StatusAdd 事件中的 TargetId 通常是 Hex 字符串，需要解析
+            if (!uint.TryParse(tidStr, System.Globalization.NumberStyles.HexNumber, null, out var tid)) return;
+
+            // 3. 定义画图名字 (格式：前缀_ID)，方便后续移除
+            string drawName = $"Status_2056_{tid}";
+
+            // 4. 判断逻辑
+            if (stack == 38)
+            {
+                // --- 画 7m 危险圆形 ---
+                var dp = accessory.Data.GetDefaultDrawProperties();
+                dp.Name = drawName;
+                dp.Owner = tid;                 // 绑定在玩家身上
+                dp.Scale = new Vector2(7f);     // 半径 7m
+                dp.Color = accessory.Data.DefaultDangerColor;
+                dp.DestoryAt = 99999;           // 持续很久，直到手动移除
+                dp.ScaleMode = ScaleMode.None;  // 大小不变
+                
+                accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
+            }
+            else if (stack == 39)
+            {
+                // --- 画 内径4 外径15 月环 ---
+                var dp = accessory.Data.GetDefaultDrawProperties();
+                dp.Name = drawName;
+                dp.Owner = tid;                 // 绑定在玩家身上
+                
+                dp.Scale = new Vector2(15f);    // 外径 15
+                dp.InnerScale = new Vector2(4f);// 内径 4
+                dp.Radian = float.Pi * 2;       // 360度整圆
+                
+                dp.Color = accessory.Data.DefaultDangerColor;
+                dp.DestoryAt = 99999;
+                dp.ScaleMode = ScaleMode.None;
+                
+                accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Donut, dp);
+            }
+            // 如果不是 38 或 39，什么都不做
+        }
+
+        [ScriptMethod(name: "Status2056移除", eventType: EventTypeEnum.StatusRemove, eventCondition: ["StatusID:2056"])]
+        public void Status_2056_Remove(Event @event, ScriptAccessory accessory)
+        {
+            // 解析 TargetId
+            var tidStr = @event["TargetId"];
+            if (!uint.TryParse(tidStr, System.Globalization.NumberStyles.HexNumber, null, out var tid)) return;
+
+            // 使用和 Add 时完全一样的名字规则
+            string drawName = $"Status_2056_{tid}";
+            
+            // 移除画图
+            accessory.Method.RemoveDraw(drawName);
+        }
         #endregion
 
 
