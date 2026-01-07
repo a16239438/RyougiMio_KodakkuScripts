@@ -20,7 +20,7 @@
   {
     "Name": "(M10S)AAC Heavyweight M2 (Savage)",
     "Guid": "d244ff34-5a89-41e4-a937-7d5c7c6b1348",
-    "Version": "0.1.0.0",
+    "Version": "0.1.0.1",
     "Author": "RyougiMio",
     "TerritoryIds": [1322,1323],
     "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/(M10S)AAC%20Heavyweight%20M2%20(Savage).cs",
@@ -38,6 +38,7 @@
 
 
 ]
+
 
 
 
