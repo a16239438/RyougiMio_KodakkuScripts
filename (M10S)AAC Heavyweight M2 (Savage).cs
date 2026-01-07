@@ -15,7 +15,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M10S)AAC Heavyweight M2 (Savage)", territorys: [1322, 1323], guid: "d244ff34-5a89-41e4-a937-7d5c7c6b1348", version: "0.1.0.0", author: "RyougiMio", note: "M10S Prediction，脚本同时在M10N/S中生效，注明TTS的机制仅有播报，注明猜测的机制纯主观臆测。")]
+    [ScriptType(name: "(M10S)AAC Heavyweight M2 (Savage)", territorys: [1322, 1323], guid: "d244ff34-5a89-41e4-a937-7d5c7c6b1348", version: "0.1.0.1", author: "RyougiMio", note: "M10S，脚本同时在M10N/S中生效")]
     public class RyougiMio_1323
     {
         #region Settings
@@ -263,8 +263,8 @@ namespace RyougiMioScriptNamespace
                 }
                 else if (stack == 1008)
                 {
-                    QTTS("两人分摊");
-                    QText("两人分摊", 5000, true);
+                    QTTS("水组分散");
+                    QText("水组分散", 5000, true);
                 }
                 else if (stack == 1006)
                 {
