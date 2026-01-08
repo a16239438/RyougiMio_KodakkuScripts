@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.1", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
+    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.2", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
     public class RyougiMio_1325
     {
         #region Settings
@@ -34,14 +34,17 @@ namespace RyougiMioScriptNamespace
         #endregion
 
         #region Variables
-        // 定义一个类用来存物体信息
+
+        // 1. 必须定义 ObjectState 类 (补全了 Rotation)
         public class ObjectState
         {
             public uint DataId;
             public Vector3 Position;
-            public float Rotation;
-            public int GroupId; // 【新增】直接存储它是 1, 2 还是 3 组
+            public float Rotation; // 【关键】DrawMechanic 里的十字画法需要这个
+            public uint EntityId;  // 记录ID，防止重复
         }
+
+
         public class ObjectStateSix
         {
             public uint DataId;
@@ -71,8 +74,11 @@ namespace RyougiMioScriptNamespace
             if (!EnableText) return;
             _acc.Method.TextInfo(text, duration, isWarning);
         }
-        // 1. 定义存储表 (Key: SourceId, Value: 物体状态)
-        private Dictionary<uint, ObjectState> _objStorage = new Dictionary<uint, ObjectState>();
+        // 2. 字典改回使用 ObjectState
+        private Dictionary<uint, ObjectState> _weaponStorage = new Dictionary<uint, ObjectState>();
+
+        // 只需要一个简单的计数器来判断是否是新的一轮（用于清空旧数据）
+        private int _weaponRecordCount = 0;
         // 【修改】字典类型也跟着改
         private Dictionary<uint, ObjectStateSix> _objStorage1 = new Dictionary<uint, ObjectStateSix>();
         private int _setPosCount = 0;
@@ -137,6 +143,71 @@ namespace RyougiMioScriptNamespace
 
         // 定义 DataId 集合
         private readonly HashSet<uint> _targetDataIds = new HashSet<uint> { 19184, 19185, 19186 };
+        // ==================== 额外的异步逻辑方法 ====================
+        private async Task Triple_Combo_AsyncLogic(Event @event, ScriptAccessory accessory)
+        {
+            // 1. 在后台等待 1 秒
+            await Task.Delay(2000);
+
+            // 如果没有收集到武器，停止
+            if (_weaponStorage.Count == 0) return;
+
+            // 2. 寻找 DataId 为 19180 的物体作为基准
+            var baseObj = accessory.Data.Objects.FirstOrDefault(x => x.DataId == 19180);
+
+            // 如果没找到 19180，为了防止脚本报错停止，这里做一个兜底：
+            // 如果没找到，就用 BOSS 的位置和面向 (@event) 代替
+            float baseRot = (baseObj != null) ? baseObj.Rotation : @event.SourceRotation;
+
+            // 3. 设定扫描参数
+            Vector3 center = new Vector3(100, 0, 100);
+
+            // 逻辑：以 19180 的【背后】为起点，顺时针扫描
+            // 冗余偏移：往逆时针方向 (+的角度) 偏 5 度
+            float offset = 1f * (float)(Math.PI / 180f);
+
+            // 起点 = 基准面向 + 180度(背后) + 5度冗余
+            float startAngle = baseRot +offset;
+
+            // 4. 排序 (顺时针扫描)
+            var sortedWeapons = _weaponStorage.Values
+                .Select(w => new
+                {
+                    Obj = w,
+                    // 计算武器相对于场中的角度
+                    Angle = MathF.Atan2(w.Position.X - center.X, w.Position.Z - center.Z)
+                })
+                .OrderBy(item =>
+                {
+                    // 顺时针距离 = 起始角度 - 物体角度
+                    float diff = startAngle - item.Angle;
+
+                    // 归一化到 0 ~ 2PI
+                    while (diff < 0) diff += 2 * (float)Math.PI;
+                    while (diff >= 2 * (float)Math.PI) diff -= 2 * (float)Math.PI;
+
+                    return diff;
+                })
+                .ToList();
+
+            // 5. 循环画图
+            for (int i = 0; i < sortedWeapons.Count; i++)
+            {
+                if (i >= 3) break;
+
+                var weapon = sortedWeapons[i].Obj;
+
+                // 时间参数
+                int delay = 0;
+                int duration = 0;
+                if (i == 0) { delay = 0; duration = 6300; }
+                else if (i == 1) { delay = 6300; duration = 5100; }
+                else if (i == 2) { delay = 11400; duration = 5100; }
+
+                // 传入 EntityId 和 DataId 进行绘图
+                DrawMechanic(weapon, weapon.EntityId, delay, duration, (uint)@event.SourceId, accessory);
+            }
+        }
 
         // --- E. 绘图辅助方法 ---
         private void DrawMechanic(ObjectState obj, uint objId, int delay, int duration, uint bossId, ScriptAccessory accessory)
@@ -432,7 +503,7 @@ namespace RyougiMioScriptNamespace
             _setPosCount = 0;
             _hasCast46148 = false;
             // 初始化清空
-            _objStorage.Clear();
+
             _objStorage1.Clear();
             _hasCast46162 = false;
             _orderCounter = 0;
@@ -835,173 +906,38 @@ namespace RyougiMioScriptNamespace
                 accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dpSafe);
             }
         }
-        [ScriptMethod(name: "三连斧镰剑_记录", eventType: EventTypeEnum.SetObjPos, eventCondition: ["SourceDataId:regex:^(19184|19185|19186)$"])]
+        // ==================== 1. 记录武器位置 (极简版) ====================
+        // 这一步只负责：看到武器就存下来。
+        [ScriptMethod(name: "三连斧镰剑_位置记录", eventType: EventTypeEnum.SetObjPos, eventCondition: ["SourceDataId:regex:^(19184|19185|19186)$"])]
         public void Record_Obj_Pos(Event @event, ScriptAccessory accessory)
         {
-            Vector3 rawPos = @event.SourcePosition;
-            Vector2 checkPos = new Vector2(rawPos.X, rawPos.Z);
-
-            // 1. 确定该物体属于哪个组
-            int detectedGroup = 0;
-
-            if (IsCloseTo(_group1Coords, checkPos)) detectedGroup = 1;
-            else if (IsCloseTo(_group3Coords, checkPos)) detectedGroup = 3; // 注意顺序
-            else if (IsCloseTo(_group2Coords, checkPos)) detectedGroup = 2;
-
-            // 如果不在任何白名单坐标里，忽略
-            if (detectedGroup == 0) return;
-
-            // 2. 计数逻辑 (1-3存, 4-6删)
-            _setPosCount++;
-            int cycleIndex = (_setPosCount - 1) % 6 + 1;
             uint sid = (uint)@event.SourceId;
 
-            if (cycleIndex <= 3) // 存
+            // 清理逻辑：如果满了3个又是新的，说明是下一轮，清空
+            if (!_weaponStorage.ContainsKey(sid) && _weaponStorage.Count >= 3)
             {
-                if (cycleIndex == 1) _objStorage.Clear();
+                _weaponStorage.Clear();
+            }
 
-                if (uint.TryParse(@event["SourceDataId"], out var did))
-                {
-                    _objStorage[sid] = new ObjectState
-                    {
-                        DataId = did,
-                        Position = rawPos,
-                        Rotation = @event.SourceRotation,
-                        GroupId = detectedGroup // 【关键】记下组号
-                    };
-                }
-            }
-            else // 删
+            if (!uint.TryParse(@event["SourceDataId"], out var did)) return;
+
+            // 【关键】实例化 ObjectState
+            _weaponStorage[sid] = new ObjectState
             {
-                if (_objStorage.ContainsKey(sid)) _objStorage.Remove(sid);
-            }
+                DataId = did,
+                Position = @event.SourcePosition,
+                Rotation = @event.SourceRotation, // 记录朝向
+                EntityId = sid
+            };
         }
 
-        // 辅助：检查坐标是否在列表中
-        private bool IsCloseTo(List<Vector2> coords, Vector2 pos)
-        {
-            foreach (var v in coords)
-            {
-                if (Vector2.Distance(pos, v) < 1.0f) return true;
-            }
-            return false;
-        }
 
-        [ScriptMethod(name: "三连斧镰剑", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:46103"])]
+        // ==================== 主入口 (同步方法) ====================
+        [ScriptMethod(name: "三连斧镰剑_扫描排序(19180基准)", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:46103"])]
         public void Triple_Combo_Draw(Event @event, ScriptAccessory accessory)
         {
-            if (_objStorage.Count == 0) return;
-
-            float bossRot = @event.SourceRotation;
-            int startGroup = 0;
-
-            // --- A. 判定 Boss 面向哪个组 ---
-            // Group 1: 0 <= rot <= pi/2
-            if (bossRot >= 0 && bossRot <= MathF.PI / 2)
-            {
-                startGroup = 1;
-            }
-            // Group 3: 0 > rot >= -3pi/4 (南 -> 西)
-            else if (bossRot < 0 && bossRot >= -175 * MathF.PI / 180)
-            {
-                startGroup = 3;
-            }
-            // Group 2: 其余
-            else
-            {
-                startGroup = 2;
-            }
-
-            // --- B. 在固定序列 [1, 3, 2] 中找到起点的索引 ---
-            // 序列: 1 -> 3 -> 2 -> 1 -> 3 -> 2 ...
-            int sequenceStartIndex = -1;
-            for (int i = 0; i < _fixedSequence.Length; i++)
-            {
-                if (_fixedSequence[i] == startGroup)
-                {
-                    sequenceStartIndex = i;
-                    break;
-                }
-            }
-
-            if (sequenceStartIndex == -1) return; // 理论上不可能
-
-            // --- C. 循环 3 次画图 ---
-            for (int i = 0; i < 3; i++)
-            {
-                // 1. 计算当前应该是哪个组 (1, 3, 还是 2)
-                int currentSeqIndex = (sequenceStartIndex + i) % 3;
-                int targetGroupId = _fixedSequence[currentSeqIndex];
-
-                // 2. 在存储里找到属于这个组的物体
-                // (因为每组只有1个物体在场上)
-                var kvp = _objStorage.FirstOrDefault(x => x.Value.GroupId == targetGroupId);
-
-                // 如果没找到(比如数据丢包)，跳过这一次
-                if (kvp.Value == null) continue;
-
-                var obj = kvp.Value;
-                var objId = kvp.Key;
-
-                // 3. 时间参数
-                int delay = 0;
-                int duration = 0;
-                if (i == 0) { delay = 0; duration = 8300; }
-                else if (i == 1) { delay = 8300; duration = 5100; }
-                else if (i == 2) { delay = 13400; duration = 5100; }
-
-                // 4. 绘图
-                DrawMechanic(obj, objId, delay, duration, (uint)@event.SourceId, accessory);
-            }
-        }
-        [ScriptMethod(name: "记录6连斧镰剑", eventType: EventTypeEnum.SetObjPos, eventCondition: ["SourceDataId:regex:^(19184|19185|19186)$"])]
-        public void Record_Obj_Pos1(Event @event, ScriptAccessory accessory)
-        {
-            Vector3 rawPos = @event.SourcePosition;
-            Vector2 checkPos = new Vector2(rawPos.X, rawPos.Z);
-
-            bool isValid = false;
-            foreach (var v in _validCoords)
-            {
-                if (Vector2.Distance(checkPos, v) < 1.0f)
-                {
-                    isValid = true;
-                    break;
-                }
-            }
-            if (!isValid) return;
-
-            uint sid = (uint)@event.SourceId;
-
-            if (_objStorage1.ContainsKey(sid))
-            {
-                _objStorage1.Remove(sid);
-            }
-            else
-            {
-                if (uint.TryParse(@event["SourceDataId"], out var did))
-                {
-                    _orderCounter++;
-
-                    var newObj = new ObjectStateSix
-                    {
-                        DataId = did,
-                        Position = rawPos,
-                        Rotation = @event.SourceRotation,
-                        Index = _orderCounter,
-                        IsDrawn = false
-                    };
-                    _objStorage1[sid] = newObj;
-
-                    // 【关键逻辑】如果机制已经开始(在最近20秒内)，且该物体还没画，立刻补画
-                    // 这种情况属于：BOSS先读条，物体后刷出来
-                    long now = DateTime.Now.Ticks;
-                    if (_mechanic47086StartTime > 0 && (now - _mechanic47086StartTime < 20 * 10000000))
-                    {
-                        TryDrawSingleObject(newObj, sid, (uint)@event.SourceId, accessory);
-                    }
-                }
-            }
+            // 在这里直接调用异步方法，不使用 await，让它自己去跑
+            _ = Triple_Combo_AsyncLogic(@event, accessory);
         }
         [ScriptMethod(name: "6连斧镰剑", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:47086"])]
         public void Action_47086_Draw(Event @event, ScriptAccessory accessory)
@@ -1122,7 +1058,7 @@ namespace RyougiMioScriptNamespace
         {
             // 通用步骤：解析被点名玩家 ID
             string tidStr = @event["TargetId"];
-            if (string.IsNullOrEmpty(tidStr) || 
+            if (string.IsNullOrEmpty(tidStr) ||
                 !ulong.TryParse(tidStr.Replace("0x", ""), System.Globalization.NumberStyles.HexNumber, null, out var targetId))
             {
                 return;
@@ -1131,10 +1067,10 @@ namespace RyougiMioScriptNamespace
             var dp = accessory.Data.GetDefaultDrawProperties();
             dp.Color = accessory.Data.DefaultDangerColor;
             // 渐变模式都是一样的
-            dp.ScaleMode = ScaleMode.ByTime; 
+            dp.ScaleMode = ScaleMode.ByTime;
 
             // ================= 分支逻辑 =================
-            
+
             if (!_hasCast46148)
             {
                 // Case A: 46148 还没读过 -> 画 8.2s 的圆 (4m)
@@ -1142,23 +1078,23 @@ namespace RyougiMioScriptNamespace
                 dp.Owner = targetId; // 绑在玩家身上
                 dp.Scale = new Vector2(4f); // 半径 4m
                 dp.DestoryAt = 8200; // 持续 8.2s
-                
+
                 // 只有这里需要 ScaleMode 为 ByTime (圆扩散)，下面矩形需要 YByTime
-                dp.ScaleMode = ScaleMode.ByTime; 
+                dp.ScaleMode = ScaleMode.ByTime;
 
                 accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
             }
             else
             {
                 // Case B: 46148 已经读过 -> 延迟 3s，从 19180 连线 (宽6m)
-                
+
                 // 1. 寻找场上的 19180 物体
                 // (如果有多个，这里默认找第一个；如果需要找最近的，可以用 OrderByDistance)
                 var sourceObj = accessory.Data.Objects.FirstOrDefault(x => x.DataId == 19180);
                 if (sourceObj == null) return; // 没找到物体就不画
 
                 dp.Name = $"Link_Delay3s_19180_{targetId}_{DateTime.Now.Ticks}";
-                
+
                 // 2. 连线关系：起点 19180 -> 终点 玩家
                 dp.Owner = sourceObj.EntityId;
                 dp.TargetObject = targetId;
@@ -1319,8 +1255,8 @@ namespace RyougiMioScriptNamespace
             string flagStr = @event["Flag"];
 
             // 解析十六进制字符串
-            if (string.IsNullOrEmpty(flagStr) || 
-                !uint.TryParse(flagStr, System.Globalization.NumberStyles.HexNumber, null, out uint flagValue)) 
+            if (string.IsNullOrEmpty(flagStr) ||
+                !uint.TryParse(flagStr, System.Globalization.NumberStyles.HexNumber, null, out uint flagValue))
             {
                 return;
             }
@@ -1340,7 +1276,7 @@ namespace RyougiMioScriptNamespace
                 case 23: posX = 89f; break;
                 case 24: posX = 111f; break;
                 case 25: posX = 121f; break;
-                default: return; 
+                default: return;
             }
 
             // ============================================================
@@ -1348,7 +1284,7 @@ namespace RyougiMioScriptNamespace
             // ============================================================
             var dp = accessory.Data.GetDefaultDrawProperties();
             dp.Name = $"Env_Rect_{index}_{DateTime.Now.Ticks}";
-            dp.Color = accessory.Data.DefaultDangerColor; 
+            dp.Color = accessory.Data.DefaultDangerColor;
 
             // 尺寸: 40x5 (X=5, Y=40)
             dp.Scale = new Vector2(10f, 40f);
@@ -1357,12 +1293,12 @@ namespace RyougiMioScriptNamespace
             // Z范围 80~120 (全长40)
             // 设起点 Z=80，朝向 0 (正南/Z增加方向)，长 40 -> 完美覆盖
             dp.Position = new Vector3(posX, 0, 80f);
-            dp.Rotation = 0f; 
+            dp.Rotation = 0f;
 
             // 时间控制: 延时 23秒，持续 5秒
-            dp.Delay = 23000;    
-            dp.DestoryAt = 5000; 
-            
+            dp.Delay = 23000;
+            dp.DestoryAt = 5000;
+
             // 动画: 渐变
             dp.ScaleMode = ScaleMode.YByTime;
 
