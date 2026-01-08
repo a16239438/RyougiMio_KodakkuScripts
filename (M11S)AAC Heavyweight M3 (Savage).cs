@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.0", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
+    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.1", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
     public class RyougiMio_1325
     {
         #region Settings
@@ -902,7 +902,7 @@ namespace RyougiMioScriptNamespace
                 startGroup = 1;
             }
             // Group 3: 0 > rot >= -3pi/4 (南 -> 西)
-            else if (bossRot < 0 && bossRot >= -3 * MathF.PI / 4)
+            else if (bossRot < 0 && bossRot >= -175 * MathF.PI / 180)
             {
                 startGroup = 3;
             }
