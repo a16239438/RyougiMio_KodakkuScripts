@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.2", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
+    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.3", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
     public class RyougiMio_1325
     {
         #region Settings
@@ -938,6 +938,55 @@ namespace RyougiMioScriptNamespace
         {
             // 在这里直接调用异步方法，不使用 await，让它自己去跑
             _ = Triple_Combo_AsyncLogic(@event, accessory);
+        }
+        [ScriptMethod(name: "记录6连斧镰剑", eventType: EventTypeEnum.SetObjPos, eventCondition: ["SourceDataId:regex:^(19184|19185|19186)$"])]
+        public void Record_Obj_Pos1(Event @event, ScriptAccessory accessory)
+        {
+            Vector3 rawPos = @event.SourcePosition;
+            Vector2 checkPos = new Vector2(rawPos.X, rawPos.Z);
+
+            bool isValid = false;
+            foreach (var v in _validCoords)
+            {
+                if (Vector2.Distance(checkPos, v) < 1.0f)
+                {
+                    isValid = true;
+                    break;
+                }
+            }
+            if (!isValid) return;
+
+            uint sid = (uint)@event.SourceId;
+
+            if (_objStorage1.ContainsKey(sid))
+            {
+                _objStorage1.Remove(sid);
+            }
+            else
+            {
+                if (uint.TryParse(@event["SourceDataId"], out var did))
+                {
+                    _orderCounter++;
+
+                    var newObj = new ObjectStateSix
+                    {
+                        DataId = did,
+                        Position = rawPos,
+                        Rotation = @event.SourceRotation,
+                        Index = _orderCounter,
+                        IsDrawn = false
+                    };
+                    _objStorage1[sid] = newObj;
+
+                    // 【关键逻辑】如果机制已经开始(在最近20秒内)，且该物体还没画，立刻补画
+                    // 这种情况属于：BOSS先读条，物体后刷出来
+                    long now = DateTime.Now.Ticks;
+                    if (_mechanic47086StartTime > 0 && (now - _mechanic47086StartTime < 20 * 10000000))
+                    {
+                        TryDrawSingleObject(newObj, sid, (uint)@event.SourceId, accessory);
+                    }
+                }
+            }
         }
         [ScriptMethod(name: "6连斧镰剑", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:47086"])]
         public void Action_47086_Draw(Event @event, ScriptAccessory accessory)
