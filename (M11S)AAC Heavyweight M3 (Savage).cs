@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.6", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
+    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.7", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
     public class RyougiMio_1325
     {
         #region Settings
@@ -1574,7 +1574,7 @@ namespace RyougiMioScriptNamespace
 
             // 时间控制: 延时 23秒，持续 5秒
             dp.Delay = 23000;
-            dp.DestoryAt = 5000;
+            dp.DestoryAt = 5600;
 
             // 动画: 渐变
             dp.ScaleMode = ScaleMode.YByTime;
@@ -1623,7 +1623,7 @@ namespace RyougiMioScriptNamespace
             dp.Scale = new Vector2(10f, 60f);
             dp.Color = accessory.Data.DefaultDangerColor;
             dp.Delay = 23000;
-            dp.DestoryAt = 5000;
+            dp.DestoryAt = 5600;
             dp.ScaleMode = ScaleMode.YByTime;
 
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
@@ -1795,7 +1795,29 @@ namespace RyougiMioScriptNamespace
 
             _castingObjects46166_46167.Clear();
         }
-        #endregion
+        [ScriptMethod(name: "玩家死亡移除连线", eventType: EventTypeEnum.Death)]
+        public void OnPlayerDeath(Event @event, ScriptAccessory accessory)
+        {
+            // 解析死亡的 TargetId
+            string tidStr = @event["TargetId"];
+            if (string.IsNullOrEmpty(tidStr) ||
+                !ulong.TryParse(tidStr.Replace("0x", ""), System.Globalization.NumberStyles.HexNumber, null, out var targetId))
+            {
+                return;
+            }
+
+            uint tid = (uint)targetId;
+
+            // 移除对应的画图元素
+            accessory.Method.RemoveDraw($"0039_{tid}");
+
+            // 同时从冷却记录中移除，以便复活后可以重新画
+            if (_tether0039DrawnTime.ContainsKey(tid))
+            {
+                _tether0039DrawnTime.Remove(tid);
+            }
+        }
+                #endregion
 
 
     }
