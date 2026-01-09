@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.5", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
+    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.6", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
     public class RyougiMio_1325
     {
         #region Settings
@@ -1280,10 +1280,15 @@ namespace RyougiMioScriptNamespace
             int lifeTime = totalDurationMs;
 
             // 如果是第 5 个及以后 (第二组)，延迟一半时间，存活时间也剩一半
+            if (_castCount_46131 > 2)
+            {
+                delay = 3900;
+                lifeTime = 2100;
+            }
             if (_castCount_46131 > 4)
             {
-                delay = totalDurationMs / 2;
-                lifeTime = totalDurationMs - delay;
+                delay = 3500;
+                lifeTime = 2500;
             }
 
             // 4. 构建绘图
@@ -1308,7 +1313,7 @@ namespace RyougiMioScriptNamespace
             dp.Delay = delay;
 
             // 告诉系统：画出来之后，显示 lifeTime 毫秒就消失
-            dp.DestoryAt = lifeTime+300;
+            dp.DestoryAt = lifeTime;
 
             // 发送指令
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
