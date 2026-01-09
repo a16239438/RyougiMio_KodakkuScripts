@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.3", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
+    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.5", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
     public class RyougiMio_1325
     {
         #region Settings
@@ -34,17 +34,14 @@ namespace RyougiMioScriptNamespace
         #endregion
 
         #region Variables
-
-        // 1. 必须定义 ObjectState 类 (补全了 Rotation)
+        // 定义一个类用来存物体信息
         public class ObjectState
         {
             public uint DataId;
             public Vector3 Position;
-            public float Rotation; // 【关键】DrawMechanic 里的十字画法需要这个
-            public uint EntityId;  // 记录ID，防止重复
+            public float Rotation;
+            public int GroupId; // 【新增】直接存储它是 1, 2 还是 3 组
         }
-
-
         public class ObjectStateSix
         {
             public uint DataId;
@@ -74,11 +71,8 @@ namespace RyougiMioScriptNamespace
             if (!EnableText) return;
             _acc.Method.TextInfo(text, duration, isWarning);
         }
-        // 2. 字典改回使用 ObjectState
-        private Dictionary<uint, ObjectState> _weaponStorage = new Dictionary<uint, ObjectState>();
-
-        // 只需要一个简单的计数器来判断是否是新的一轮（用于清空旧数据）
-        private int _weaponRecordCount = 0;
+        // 1. 定义存储表 (Key: SourceId, Value: 物体状态)
+        private Dictionary<uint, ObjectState> _objStorage = new Dictionary<uint, ObjectState>();
         // 【修改】字典类型也跟着改
         private Dictionary<uint, ObjectStateSix> _objStorage1 = new Dictionary<uint, ObjectStateSix>();
         private int _setPosCount = 0;
@@ -96,7 +90,10 @@ namespace RyougiMioScriptNamespace
         private List<MechanicObject> _castingObjects = new List<MechanicObject>();
         // 默认 false (没读过)
         private bool _hasCast46162 = false;
-
+        // 变量定义区域添加
+        private Dictionary<uint, long> _tether0039DrawnTime = new Dictionary<uint, long>();
+        private HashSet<uint> _targetIcon001EPlayers = new HashSet<uint>();
+        private List<(uint SourceId, uint ActionId, int Quadrant)> _castingObjects46166_46167 = new List<(uint, uint, int)>();
         // 定义物体结构
         private class MechanicObject
         {
@@ -143,71 +140,6 @@ namespace RyougiMioScriptNamespace
 
         // 定义 DataId 集合
         private readonly HashSet<uint> _targetDataIds = new HashSet<uint> { 19184, 19185, 19186 };
-        // ==================== 额外的异步逻辑方法 ====================
-        private async Task Triple_Combo_AsyncLogic(Event @event, ScriptAccessory accessory)
-        {
-            // 1. 在后台等待 1 秒
-            await Task.Delay(2000);
-
-            // 如果没有收集到武器，停止
-            if (_weaponStorage.Count == 0) return;
-
-            // 2. 寻找 DataId 为 19180 的物体作为基准
-            var baseObj = accessory.Data.Objects.FirstOrDefault(x => x.DataId == 19180);
-
-            // 如果没找到 19180，为了防止脚本报错停止，这里做一个兜底：
-            // 如果没找到，就用 BOSS 的位置和面向 (@event) 代替
-            float baseRot = (baseObj != null) ? baseObj.Rotation : @event.SourceRotation;
-
-            // 3. 设定扫描参数
-            Vector3 center = new Vector3(100, 0, 100);
-
-            // 逻辑：以 19180 的【背后】为起点，顺时针扫描
-            // 冗余偏移：往逆时针方向 (+的角度) 偏 5 度
-            float offset = 1f * (float)(Math.PI / 180f);
-
-            // 起点 = 基准面向 + 180度(背后) + 5度冗余
-            float startAngle = baseRot +offset;
-
-            // 4. 排序 (顺时针扫描)
-            var sortedWeapons = _weaponStorage.Values
-                .Select(w => new
-                {
-                    Obj = w,
-                    // 计算武器相对于场中的角度
-                    Angle = MathF.Atan2(w.Position.X - center.X, w.Position.Z - center.Z)
-                })
-                .OrderBy(item =>
-                {
-                    // 顺时针距离 = 起始角度 - 物体角度
-                    float diff = startAngle - item.Angle;
-
-                    // 归一化到 0 ~ 2PI
-                    while (diff < 0) diff += 2 * (float)Math.PI;
-                    while (diff >= 2 * (float)Math.PI) diff -= 2 * (float)Math.PI;
-
-                    return diff;
-                })
-                .ToList();
-
-            // 5. 循环画图
-            for (int i = 0; i < sortedWeapons.Count; i++)
-            {
-                if (i >= 3) break;
-
-                var weapon = sortedWeapons[i].Obj;
-
-                // 时间参数
-                int delay = 0;
-                int duration = 0;
-                if (i == 0) { delay = 0; duration = 6300; }
-                else if (i == 1) { delay = 6300; duration = 5100; }
-                else if (i == 2) { delay = 11400; duration = 5100; }
-
-                // 传入 EntityId 和 DataId 进行绘图
-                DrawMechanic(weapon, weapon.EntityId, delay, duration, (uint)@event.SourceId, accessory);
-            }
-        }
 
         // --- E. 绘图辅助方法 ---
         private void DrawMechanic(ObjectState obj, uint objId, int delay, int duration, uint bossId, ScriptAccessory accessory)
@@ -502,12 +434,22 @@ namespace RyougiMioScriptNamespace
             _acc = accessory;
             _setPosCount = 0;
             _hasCast46148 = false;
-            // 初始化清空
+            _tripleComboSetPosCount = 0;
+            _tripleComboRecordedIds.Clear(); // 新增
+            _tether0039DrawnTime.Clear();
+            _targetIcon001EPlayers.Clear();
+            _castingObjects46166_46167.Clear();
 
+
+            // 清空存储
+            _objStorage.Clear();
             _objStorage1.Clear();
+            _tripleComboStorage.Clear(); // 新增这行
+
             _hasCast46162 = false;
             _orderCounter = 0;
             _castCount_46131 = 0;
+            _mechanic47086StartTime = 0; // 也建议重置这个
             _allValidCoords = _group1Coords.Concat(_group2Coords).Concat(_group3Coords).ToList();
             _markedPlayers.Clear();
             _castingObjects.Clear();
@@ -906,39 +848,320 @@ namespace RyougiMioScriptNamespace
                 accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dpSafe);
             }
         }
-        // ==================== 1. 记录武器位置 (极简版) ====================
-        // 这一步只负责：看到武器就存下来。
-        [ScriptMethod(name: "三连斧镰剑_位置记录", eventType: EventTypeEnum.SetObjPos, eventCondition: ["SourceDataId:regex:^(19184|19185|19186)$"])]
-        public void Record_Obj_Pos(Event @event, ScriptAccessory accessory)
-        {
-            uint sid = (uint)@event.SourceId;
+        #region 三连斧镰剑改进版
 
-            // 清理逻辑：如果满了3个又是新的，说明是下一轮，清空
-            if (!_weaponStorage.ContainsKey(sid) && _weaponStorage.Count >= 3)
+        // ==================== 变量定义 ====================
+        private Dictionary<uint, ObjectState> _tripleComboStorage = new Dictionary<uint, ObjectState>();
+        private int _tripleComboSetPosCount = 0; // SetObjPos 计数器
+        private HashSet<uint> _tripleComboRecordedIds = new HashSet<uint>(); // 新增：记录已处理的 SourceId
+
+        // ==================== 辅助方法 ====================
+
+        /// <summary>
+        /// 检查坐标是否在列表中的某个点附近
+        /// </summary>
+        private bool IsCloseToAny(List<Vector2> coords, Vector2 pos, float threshold = 1.0f)
+        {
+            foreach (var v in coords)
             {
-                _weaponStorage.Clear();
+                if (Vector2.Distance(pos, v) < threshold) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 检查坐标是否在三连机制的有效范围内
+        /// </summary>
+        private bool IsValidTripleComboPosition(Vector2 pos)
+        {
+            return IsCloseToAny(_group1Coords, pos) ||
+                IsCloseToAny(_group2Coords, pos) ||
+                IsCloseToAny(_group3Coords, pos);
+        }
+
+        /// <summary>
+        /// 根据 Boss 朝向，将物体按顺时针排序
+        /// </summary>
+        private List<IGameObject> SortWeaponsClockwiseWithTolerance(List<IGameObject> weapons, Vector3 center, float bossRotationRad)
+        {
+            if (weapons == null || weapons.Count == 0)
+            {
+                return new List<IGameObject>();
             }
 
-            if (!uint.TryParse(@event["SourceDataId"], out var did)) return;
+            // Boss 朝向转角度
+            float bossRotationDeg = bossRotationRad * 180f / MathF.PI;
+            if (bossRotationDeg < 0) bossRotationDeg += 360f;
 
-            // 【关键】实例化 ObjectState
-            _weaponStorage[sid] = new ObjectState
-            {
-                DataId = did,
-                Position = @event.SourcePosition,
-                Rotation = @event.SourceRotation, // 记录朝向
-                EntityId = sid
-            };
+            // 计算每个物体相对于中心的角度
+            var weaponsWithAngle = weapons
+                .Where(w => w != null)
+                .Select(w => new
+                {
+                    Weapon = w,
+                    Angle = GetAbsoluteAngle(w.Position, center)
+                })
+                .ToList();
+
+            // 找到与 Boss 面向最接近的物体作为第一个
+            var firstWeapon = weaponsWithAngle
+                .OrderBy(w => GetAngleDifference(w.Angle, bossRotationDeg))
+                .First();
+
+            float startAngle = firstWeapon.Angle;
+
+            // 从第一个物体开始，按顺时针排序
+            return weaponsWithAngle
+                .OrderBy(w => GetRelativeAngleFrom(w.Angle, startAngle))
+                .Select(w => w.Weapon)
+                .ToList();
         }
+        /// <summary>
+        /// 计算点相对于中心和起始角度的顺时针角度
+        /// </summary>
 
 
-        // ==================== 主入口 (同步方法) ====================
-        [ScriptMethod(name: "三连斧镰剑_扫描排序(19180基准)", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:46103"])]
-        public void Triple_Combo_Draw(Event @event, ScriptAccessory accessory)
+        /// <summary>
+        /// 计算两个角度之间的最小差值 (0-180)
+        /// </summary>
+        private float GetAngleDifference(float angle1, float angle2)
         {
-            // 在这里直接调用异步方法，不使用 await，让它自己去跑
-            _ = Triple_Combo_AsyncLogic(@event, accessory);
+            float diff = MathF.Abs(angle1 - angle2);
+            if (diff > 180f) diff = 360f - diff;
+            return diff;
         }
+
+        /// <summary>
+        /// 计算从起始角度开始的顺时针相对角度 (0-360)
+        /// </summary>
+        private float GetRelativeAngleFrom(float angle, float startAngle)
+        {
+            float relative = angle - startAngle;
+            if (relative < 0) relative += 360f;
+            return relative;
+        }
+
+        // ==================== 事件处理 ====================
+
+
+        [ScriptMethod(name: "三连斧镰剑", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:46103"])]
+        public async void Triple_Combo_Draw_Improved(Event @event, ScriptAccessory accessory)
+        {
+            uint bossId = (uint)@event.SourceId;
+            
+            await Task.Delay(2000);
+
+            Vector3 center = new Vector3(100f, 0f, 100f);
+            
+            var weapons = accessory.Data.Objects
+                .Where(obj => obj.DataId == 19184 || obj.DataId == 19185 || obj.DataId == 19186)
+                .Where(obj => Vector2.Distance(new Vector2(obj.Position.X, obj.Position.Z), new Vector2(100f, 100f)) > 5f)
+                .ToList();
+
+            if (weapons.Count < 3)
+            {
+                accessory.Method.SendChat($"/e [警告] 物体数量不足: {weapons.Count}");
+                return;
+            }
+
+            float bossRotation = @event.SourceRotation;
+            try
+            {
+                var bossObj = accessory.Data.Objects.SearchById(bossId);
+                if (bossObj != null)
+                {
+                    bossRotation = bossObj.Rotation;
+                }
+            }
+            catch { }
+
+            // 按顺时针排序
+            var sortedWeapons = weapons
+                .OrderBy(w => {
+                    float dx = w.Position.X - center.X;
+                    float dz = w.Position.Z - center.Z;
+                    float angle = MathF.Atan2(dx, dz);
+                    
+                    float relative = angle - bossRotation;
+                    // 归一化到 (-2π, 0]
+                    while (relative > 0) relative -= MathF.PI * 2;
+                    while (relative <= -MathF.PI * 2) relative += MathF.PI * 2;
+                    
+                    // 把 -2π (即 -360°) 当作 0 处理
+                    if (MathF.Abs(relative + MathF.PI * 2) < 0.01f) relative = 0;
+                    
+                    return -relative;
+                })
+                .ToList();
+
+            int[] delays = { 0, 6300, 11400 };
+            int[] durations = { 6300, 5100, 5100 };
+
+            for (int i = 0; i < 3; i++)
+            {
+                var weapon = sortedWeapons[i];
+                
+                var obj = new ObjectState
+                {
+                    DataId = weapon.DataId,
+                    Position = weapon.Position,
+                    Rotation = weapon.Rotation,
+                    GroupId = 0
+                };
+
+                DrawTripleComboMechanic(obj, weapon.EntityId, delays[i], durations[i], bossId, accessory);
+            }
+        }
+
+
+
+        private float GetAbsoluteAngle(Vector3 point, Vector3 center)
+        {
+            float dx = point.X - center.X;
+            float dz = point.Z - center.Z;
+            
+            float angleRad = MathF.Atan2(dx, dz);
+            float angleDeg = angleRad * 180f / MathF.PI;
+            if (angleDeg < 0) angleDeg += 360f;
+
+            return angleDeg;
+        }
+
+        /// <summary>
+        /// 直接对游戏物体按顺时针排序
+        /// </summary>
+        private List<IGameObject> SortWeaponsClockwise(List<IGameObject> weapons, Vector3 center, float bossRotationRad)
+        {
+            if (weapons == null || weapons.Count == 0)
+            {
+                return new List<IGameObject>();
+            }
+
+            float bossRotationDeg = bossRotationRad * 180f / MathF.PI;
+            if (bossRotationDeg < 0) bossRotationDeg += 360f;
+
+            float startRotationDeg = bossRotationDeg;
+
+            return weapons
+                .Where(w => w != null)
+                .OrderBy(w => GetRelativeAngle(w.Position, center, startRotationDeg))
+                .ToList();
+        }
+        private float GetRelativeAngle(Vector3 point, Vector3 center, float startRotationDeg)
+        {
+            float dx = point.X - center.X;
+            float dz = point.Z - center.Z;
+
+            float angleRad = MathF.Atan2(dx, -dz);
+            float angleDeg = angleRad * 180f / MathF.PI;
+            if (angleDeg < 0) angleDeg += 360f;
+
+            float relative = angleDeg - startRotationDeg;
+            if (relative < 0) relative += 360f;
+
+            return relative;
+        }
+
+        /// <summary>
+        /// 绘制三连机制的单个物体
+        /// </summary>
+        private void DrawTripleComboMechanic(ObjectState obj, uint objId, int delay, int duration, uint bossId, ScriptAccessory accessory)
+        {
+            string baseName = $"Triple_{obj.DataId}_{delay}_{DateTime.Now.Ticks}";
+
+            // ========== 19184 = 斧子 = 钢铁 (圆形AOE) ==========
+            if (obj.DataId == 19184)
+            {
+                var dp = accessory.Data.GetDefaultDrawProperties();
+                dp.Name = baseName + "_Iron_Obj";
+                dp.Position = obj.Position;
+                dp.Scale = new Vector2(8f);
+                dp.Color = accessory.Data.DefaultDangerColor;
+                dp.Delay = delay;
+                dp.DestoryAt = duration;
+                dp.ScaleMode = ScaleMode.ByTime;
+                accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
+
+                var dpPlayer = accessory.Data.GetDefaultDrawProperties();
+                dpPlayer.Name = baseName + "_Iron_Player";
+                dpPlayer.Owner = accessory.Data.Me;
+                dpPlayer.Scale = new Vector2(6f);
+                dpPlayer.Color = accessory.Data.DefaultSafeColor;
+                dpPlayer.Delay = delay;
+                dpPlayer.DestoryAt = duration;
+                dpPlayer.ScaleMode = ScaleMode.ByTime;
+                accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dpPlayer);
+            }
+            // ========== 19185 = 镰刀 = 月环 (甜甜圈AOE) ==========
+            else if (obj.DataId == 19185)
+            {
+                var dp = accessory.Data.GetDefaultDrawProperties();
+                dp.Name = baseName + "_Moon_Obj";
+                dp.Position = obj.Position;
+                dp.Scale = new Vector2(60f);
+                dp.InnerScale = new Vector2(5f);
+                dp.Radian = float.Pi * 2;
+                dp.Color = accessory.Data.DefaultDangerColor;
+                dp.Delay = delay;
+                dp.DestoryAt = duration;
+                dp.ScaleMode = ScaleMode.ByTime;
+                accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Donut, dp);
+
+                var party = accessory.Data.PartyList;
+                foreach (var tid in party)
+                {
+                    var dpFan = accessory.Data.GetDefaultDrawProperties();
+                    dpFan.Name = $"{baseName}_Moon_Fan_{tid}";
+                    dpFan.Owner = objId;
+                    dpFan.TargetObject = tid;
+                    dpFan.Radian = float.Pi / 6;
+                    dpFan.Scale = new Vector2(60f);
+                    dpFan.Color = accessory.Data.DefaultDangerColor;
+                    dpFan.Delay = delay;
+                    dpFan.DestoryAt = duration;
+                    dpFan.ScaleMode = ScaleMode.ByTime;
+                    accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dpFan);
+                }
+            }
+            // ========== 19186 = 大剑 = 十字 (十字AOE) ==========
+            else if (obj.DataId == 19186)
+            {
+                for (int k = 0; k < 4; k++)
+                {
+                    var dp = accessory.Data.GetDefaultDrawProperties();
+                    dp.Name = $"{baseName}_Cross_Obj_{k}";
+                    dp.Position = obj.Position;
+                    dp.Rotation = obj.Rotation + (float)(Math.PI / 2 * k);
+                    dp.Scale = new Vector2(10f, 40f);
+                    dp.Color = accessory.Data.DefaultDangerColor;
+                    dp.Delay = delay;
+                    dp.DestoryAt = duration;
+                    dp.ScaleMode = ScaleMode.YByTime;
+                    accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
+                }
+
+                var party = accessory.Data.PartyList;
+                for (int hi = 2; hi <= 3; hi++)
+                {
+                    if (hi >= party.Count) break;
+                    var tid = party[hi];
+
+                    var dpRect = accessory.Data.GetDefaultDrawProperties();
+                    dpRect.Name = $"{baseName}_Cross_Healer_Rect_{tid}";
+                    dpRect.Owner = objId;
+                    dpRect.TargetObject = tid;
+                    dpRect.Scale = new Vector2(6f, 60f);
+                    dpRect.Color = accessory.Data.DefaultDangerColor;
+                    dpRect.Delay = delay + 2500;
+                    dpRect.DestoryAt = Math.Max(duration - 2500, 1000);
+                    dpRect.ScaleMode = ScaleMode.YByTime;
+                    accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dpRect);
+                }
+            }
+        }
+
+        #endregion
+
         [ScriptMethod(name: "记录6连斧镰剑", eventType: EventTypeEnum.SetObjPos, eventCondition: ["SourceDataId:regex:^(19184|19185|19186)$"])]
         public void Record_Obj_Pos1(Event @event, ScriptAccessory accessory)
         {
@@ -1046,7 +1269,7 @@ namespace RyougiMioScriptNamespace
 
             // 2. 获取读条时间 (毫秒)
             // 如果 CastTime 解析失败，给个默认值 5000 毫秒
-            int totalDurationMs = 5000;
+            int totalDurationMs = 5700;
             if (float.TryParse(@event["CastTime"], out float castTimeSeconds))
             {
                 totalDurationMs = (int)(castTimeSeconds * 1000);
@@ -1085,7 +1308,7 @@ namespace RyougiMioScriptNamespace
             dp.Delay = delay;
 
             // 告诉系统：画出来之后，显示 lifeTime 毫秒就消失
-            dp.DestoryAt = lifeTime;
+            dp.DestoryAt = lifeTime+300;
 
             // 发送指令
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
@@ -1352,6 +1575,220 @@ namespace RyougiMioScriptNamespace
             dp.ScaleMode = ScaleMode.YByTime;
 
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
+        }
+        [ScriptMethod(name: "直线连线", eventType: EventTypeEnum.Tether, eventCondition: ["Id:regex:^(0039|00F9)$"])]
+        public void OnTether_0039_00F9(Event @event, ScriptAccessory accessory)
+        {
+            // 如果已经读过 46162，不处理
+            if (_hasCast46162)
+            {
+                return;
+            }
+
+            // 解析 TargetId
+            string tidStr = @event["TargetId"];
+            if (string.IsNullOrEmpty(tidStr) ||
+                !ulong.TryParse(tidStr.Replace("0x", ""), System.Globalization.NumberStyles.HexNumber, null, out var targetId))
+            {
+                return;
+            }
+
+            uint tid = (uint)targetId;
+            long now = DateTime.Now.Ticks;
+            long cooldown = 28 * 10000000L; // 28秒，单位是 ticks (1秒 = 10000000 ticks)
+
+            // 检查是否在冷却时间内
+            if (_tether0039DrawnTime.TryGetValue(tid, out long lastTime))
+            {
+                if (now - lastTime < cooldown)
+                {
+                    // 还在冷却中，不重复画
+                    return;
+                }
+            }
+
+            // 记录当前时间
+            _tether0039DrawnTime[tid] = now;
+
+            // 画矩形
+            var dp = accessory.Data.GetDefaultDrawProperties();
+            dp.Name = $"0039_{tid}";
+            dp.Owner = @event.SourceId;
+            dp.TargetObject = tid;
+            dp.Scale = new Vector2(10f, 60f);
+            dp.Color = accessory.Data.DefaultDangerColor;
+            dp.Delay = 23000;
+            dp.DestoryAt = 5000;
+            dp.ScaleMode = ScaleMode.YByTime;
+
+            accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
+        }
+        [ScriptMethod(name: "检测46162", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:46162"])]
+        public void OnCast_46162(Event @event, ScriptAccessory accessory)
+        {
+            _hasCast46162 = true;
+        }
+        #endregion
+        #region 塔
+        [ScriptMethod(name: "记录点名001E", eventType: EventTypeEnum.TargetIcon, eventCondition: ["Id:001E"])]
+        public void OnTargetIcon_001E_Record(Event @event, ScriptAccessory accessory)
+        {
+            string tidStr = @event["TargetId"];
+            if (string.IsNullOrEmpty(tidStr) ||
+                !ulong.TryParse(tidStr.Replace("0x", ""), System.Globalization.NumberStyles.HexNumber, null, out var targetId))
+            {
+                return;
+            }
+
+            _targetIcon001EPlayers.Add((uint)targetId);
+        }
+
+        private object _lock46166_46167 = new object();
+
+        [ScriptMethod(name: "记录46166_46167读条", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(46166|46167)$"])]
+        public void OnCast_46166_46167_Record(Event @event, ScriptAccessory accessory)
+        {
+            if (!uint.TryParse(@event["ActionId"], out var actionId)) return;
+            if (!int.TryParse(@event["DurationMilliseconds"], out var duration)) return;
+
+            Vector3 pos = @event.SourcePosition;
+            uint sourceId = (uint)@event.SourceId;
+
+            int quadrant = 0;
+            if (pos.X > 100 && pos.Z < 100) quadrant = 1;
+            else if (pos.X > 100 && pos.Z > 100) quadrant = 2;
+            else if (pos.X < 100 && pos.Z > 100) quadrant = 3;
+            else if (pos.X < 100 && pos.Z < 100) quadrant = 4;
+
+            if (quadrant == 0) return;
+
+            int currentCount = 0;
+            bool shouldDraw = false;
+
+            lock (_lock46166_46167)
+            {
+                if (_castingObjects46166_46167.Any(x => x.SourceId == sourceId))
+                {
+                    return;
+                }
+
+                _castingObjects46166_46167.Add((sourceId, actionId, quadrant));
+                currentCount = _castingObjects46166_46167.Count;
+                
+                if (currentCount >= 4)
+                {
+                    shouldDraw = true;
+                }
+            }
+
+            //accessory.Method.SendChat($"/e [调试] 记录: ActionId={actionId}, 象限={quadrant}, 当前数量={currentCount}");
+
+            if (shouldDraw)
+            {
+                //accessory.Method.SendChat($"/e [调试] 触发绘图逻辑");
+                DrawDisplacementLogic(accessory, duration);
+            }
+        }
+
+
+        private void DrawDisplacementLogic(ScriptAccessory accessory, int duration)
+        {
+            uint myId = accessory.Data.Me;
+            var party = accessory.Data.PartyList;
+            int myIndex = -1;
+
+            for (int i = 0; i < party.Count; i++)
+            {
+                if (party[i] == myId)
+                {
+                    myIndex = i;
+                    break;
+                }
+            }
+
+            //accessory.Method.SendChat($"/e [调试] 我的索引={myIndex}");
+
+            if (myIndex == -1) return;
+
+            var objs46166 = _castingObjects46166_46167
+                .Where(x => x.ActionId == 46166)
+                .OrderBy(x => x.Quadrant)
+                .ToList();
+
+            var objs46167 = _castingObjects46166_46167
+                .Where(x => x.ActionId == 46167)
+                .OrderBy(x => x.Quadrant)
+                .ToList();
+
+            //accessory.Method.SendChat($"/e [调试] 46166数量={objs46166.Count}, 46167数量={objs46167.Count}");
+
+            uint targetSourceId = 0;
+
+            // MT (索引 0)
+            if (myIndex == 0)
+            {
+                if (objs46166.Count >= 1)
+                {
+                    targetSourceId = objs46166[0].SourceId;
+                }
+            }
+            // ST (索引 1)
+            else if (myIndex == 1)
+            {
+                if (objs46166.Count >= 2)
+                {
+                    targetSourceId = objs46166[1].SourceId;
+                }
+            }
+            // DPS 和 H (索引 2~7)
+            else if (myIndex >= 2 && myIndex <= 7)
+            {
+                // 检查 001E 点名
+                if (_targetIcon001EPlayers.Contains(myId))
+                {
+                    //accessory.Method.SendChat($"/e [调试] 我有001E点名，不画");
+                    _castingObjects46166_46167.Clear();
+                    return;
+                }
+
+                if (myIndex == 4 || myIndex == 5)
+                {
+                    if (objs46167.Count >= 1)
+                    {
+                        targetSourceId = objs46167[0].SourceId;
+                    }
+                }
+                else if (myIndex == 2 || myIndex == 3 || myIndex == 6 || myIndex == 7)
+                {
+                    if (objs46167.Count >= 2)
+                    {
+                        targetSourceId = objs46167[1].SourceId;
+                    }
+                }
+            }
+
+            //accessory.Method.SendChat($"/e [调试] 目标SourceId={targetSourceId}");
+
+            if (targetSourceId != 0)
+            {
+                var dp = accessory.Data.GetDefaultDrawProperties();
+                dp.Name = $"Displacement_{myId}_{targetSourceId}_{DateTime.Now.Ticks}";
+                dp.Owner = targetSourceId;
+                dp.TargetObject = myId;
+                dp.Scale = new Vector2(5f);
+                dp.ScaleMode = ScaleMode.YByDistance;
+                dp.Color = accessory.Data.DefaultSafeColor;
+                dp.DestoryAt = duration;
+
+                accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Displacement, dp);
+                //accessory.Method.SendChat($"/e [调试] 已发送绘图指令");
+            }
+            else
+            {
+                //accessory.Method.SendChat($"/e [调试] 没有找到目标，不画");
+            }
+
+            _castingObjects46166_46167.Clear();
         }
         #endregion
 
