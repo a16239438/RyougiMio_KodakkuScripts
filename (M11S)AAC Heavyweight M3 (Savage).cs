@@ -1645,7 +1645,7 @@ namespace RyougiMioScriptNamespace
 
         private object _lock46166_46167 = new object();
 
-        [ScriptMethod(name: "记录46166_46167读条", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(46166|46167)$"])]
+        [ScriptMethod(name: "1122塔", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(46166|46167)$"])]
         public void OnCast_46166_46167_Record(Event @event, ScriptAccessory accessory)
         {
             if (!uint.TryParse(@event["ActionId"], out var actionId)) return;
