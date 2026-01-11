@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.7", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
+    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.9", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
     public class RyougiMio_1325
     {
         #region Settings
@@ -28,6 +28,8 @@ namespace RyougiMioScriptNamespace
         public ScriptColor DangerColor { get; set; } = new ScriptColor() { V4 = new Vector4(1.0f, 0.0f, 0.0f, 0.01f) };
         [UserSetting("常用安全色")]
         public ScriptColor SafeColor { get; set; } = new ScriptColor() { V4 = new Vector4(0.0f, 1.0f, 0.0f, 0.01f) };
+        [UserSetting("陨石颜色")]
+        public ScriptColor SafeColor1 { get; set; } = new ScriptColor() { V4 = new Vector4(0.0f, 0.0f, 0.6f, 1.0f) };
 
         [UserSetting("指路/引导颜色 (默认为青)")]
         public ScriptColor GuideColor { get; set; } = new ScriptColor() { V4 = new Vector4(0.0f, 1.0f, 1.0f, 0.01f) };
@@ -52,6 +54,18 @@ namespace RyougiMioScriptNamespace
             public bool IsDrawn; // 【新增】标记是否已经画过
         }
         private ScriptAccessory _acc;
+
+
+        [UserSetting("P4踩塔 攻略")]
+        public Phase4_Towers Phase4_Towers1 { get; set; } = Phase4_Towers.全引导;
+
+        public enum Phase4_Towers
+        {
+
+            全引导,
+            近战顺远程逆
+
+        }
 
 
         #endregion
@@ -1290,6 +1304,16 @@ namespace RyougiMioScriptNamespace
                 delay = 3500;
                 lifeTime = 2500;
             }
+            if (_castCount_46131 == 9)
+            {
+                delay = 0;
+                lifeTime = 6000;
+            }
+            if (_castCount_46131 == 10)
+            {
+                delay = 0;
+                lifeTime = 6000;
+            }
 
             // 4. 构建绘图
             var dp = accessory.Data.GetDefaultDrawProperties();
@@ -1561,7 +1585,7 @@ namespace RyougiMioScriptNamespace
             // ============================================================
             var dp = accessory.Data.GetDefaultDrawProperties();
             dp.Name = $"Env_Rect_{index}_{DateTime.Now.Ticks}";
-            dp.Color = accessory.Data.DefaultDangerColor;
+            dp.Color = SafeColor1.V4;
 
             // 尺寸: 40x5 (X=5, Y=40)
             dp.Scale = new Vector2(10f, 40f);
@@ -1690,9 +1714,140 @@ namespace RyougiMioScriptNamespace
 
             if (shouldDraw)
             {
+                if (Phase4_Towers1 == Phase4_Towers.近战顺远程逆){DrawDisplacementLogic(accessory, duration);}
+                if (Phase4_Towers1 == Phase4_Towers.全引导){DrawDisplacementLogic1(accessory, duration);}
                 //accessory.Method.SendChat($"/e [调试] 触发绘图逻辑");
-                DrawDisplacementLogic(accessory, duration);
             }
+        }
+        private void DrawDisplacementLogic1(ScriptAccessory accessory, int duration)
+        {
+            uint myId = accessory.Data.Me;
+            var party = accessory.Data.PartyList;
+            int myIndex = -1;
+
+            for (int i = 0; i < party.Count; i++)
+            {
+                if (party[i] == myId)
+                {
+                    myIndex = i;
+                    break;
+                }
+            }
+
+            if (myIndex == -1) return;
+
+            var objs46166 = _castingObjects46166_46167
+                .Where(x => x.ActionId == 46166)
+                .OrderBy(x => x.Quadrant)
+                .ToList();
+
+            var objs46167 = _castingObjects46166_46167
+                .Where(x => x.ActionId == 46167)
+                .OrderBy(x => x.Quadrant)
+                .ToList();
+
+            uint targetSourceId = 0;
+
+            // MT (索引 0)：第一个 46166
+            if (myIndex == 0)
+            {
+                if (objs46166.Count >= 1)
+                {
+                    targetSourceId = objs46166[0].SourceId;
+                }
+            }
+            // ST (索引 1)：第二个 46166
+            else if (myIndex == 1)
+            {
+                if (objs46166.Count >= 2)
+                {
+                    targetSourceId = objs46166[1].SourceId;
+                }
+            }
+            // 索引 4：第一个 46167
+            else if (myIndex == 4)
+            {
+                if (objs46167.Count >= 1)
+                {
+                    targetSourceId = objs46167[0].SourceId;
+                }
+            }
+            // 索引 5：第二个 46167
+            else if (myIndex == 5)
+            {
+                if (objs46167.Count >= 2)
+                {
+                    targetSourceId = objs46167[1].SourceId;
+                }
+            }
+            // 索引 2, 3, 6, 7：按优先级 2 -> 6 -> 7 -> 3 分配
+            else if (myIndex == 2 || myIndex == 3 || myIndex == 6 || myIndex == 7)
+            {
+                // 如果自己有 001E 点名，不画
+                if (_targetIcon001EPlayers.Contains(myId))
+                {
+                    _castingObjects46166_46167.Clear();
+                    return;
+                }
+
+                // 优先级顺序：2, 6, 7, 3
+                int[] priorityOrder = { 2, 6, 7, 3 };
+
+                // 找出没有 001E 点名的玩家，按优先级排序
+                var availablePlayers = priorityOrder
+                    .Where(idx => idx < party.Count && !_targetIcon001EPlayers.Contains(party[idx]))
+                    .ToList();
+
+                // 找到自己在可用玩家中的排名
+                int myRank = -1;
+                for (int i = 0; i < availablePlayers.Count; i++)
+                {
+                    if (availablePlayers[i] == myIndex)
+                    {
+                        myRank = i;
+                        break;
+                    }
+                }
+
+                if (myRank == -1)
+                {
+                    _castingObjects46166_46167.Clear();
+                    return;
+                }
+
+                // 排名 0, 1 指向第一个 46167
+                // 排名 2, 3 指向第二个 46167
+                if (myRank == 0 || myRank == 1)
+                {
+                    if (objs46167.Count >= 1)
+                    {
+                        targetSourceId = objs46167[0].SourceId;
+                    }
+                }
+                else if (myRank == 2 || myRank == 3)
+                {
+                    if (objs46167.Count >= 2)
+                    {
+                        targetSourceId = objs46167[1].SourceId;
+                    }
+                }
+            }
+
+            if (targetSourceId != 0)
+            {
+                var dp = accessory.Data.GetDefaultDrawProperties();
+                dp.Name = $"Displacement_{myId}_{targetSourceId}_{DateTime.Now.Ticks}";
+                dp.Owner = targetSourceId;
+                dp.TargetObject = myId;
+                dp.Scale = new Vector2(5f);
+                dp.ScaleMode = ScaleMode.YByDistance;
+                dp.Color = accessory.Data.DefaultSafeColor;
+                dp.DestoryAt = duration;
+
+                accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Displacement, dp);
+            }
+
+            _castingObjects46166_46167.Clear();
         }
 
 
