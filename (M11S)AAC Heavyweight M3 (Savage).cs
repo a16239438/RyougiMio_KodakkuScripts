@@ -14,7 +14,7 @@ using KodakkuAssist.Extensions;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.0.9", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
+    [ScriptType(name: "(M11S)AAC Heavyweight M3 (Savage)", territorys: [1324, 1325], guid: "725bcd38-1173-420e-a248-b3e11a1ff1b3", version: "0.1.2.0", author: "RyougiMio", note: "M11S，脚本同时在M11N/S中生效。")]
     public class RyougiMio_1325
     {
         #region Settings
@@ -1291,7 +1291,7 @@ namespace RyougiMioScriptNamespace
 
             // 3. 计算 延迟时间(delay) 和 存活时间(destoryAt)
             int delay = 0;
-            int lifeTime = totalDurationMs;
+            int lifeTime = totalDurationMs+300;
 
             // 如果是第 5 个及以后 (第二组)，延迟一半时间，存活时间也剩一半
             if (_castCount_46131 > 2)
@@ -1817,14 +1817,14 @@ namespace RyougiMioScriptNamespace
 
                 // 排名 0, 1 指向第一个 46167
                 // 排名 2, 3 指向第二个 46167
-                if (myRank == 0 || myRank == 1)
+                if (myRank == 0)
                 {
                     if (objs46167.Count >= 1)
                     {
                         targetSourceId = objs46167[0].SourceId;
                     }
                 }
-                else if (myRank == 2 || myRank == 3)
+                else if (myRank == 1)
                 {
                     if (objs46167.Count >= 2)
                     {
