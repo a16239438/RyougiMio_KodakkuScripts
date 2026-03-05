@@ -34,10 +34,20 @@
     "TerritoryIds": [1324,1325],
     "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/(M11S)AAC%20Heavyweight%20M3%20(Savage).cs",
     "UpdateInfo": "AAC Heavyweight M3 (Savage)Prediction Ver，Powered By Gemini , feat.Small_miao & Cicero"
+  },
+  {
+    "Name": "(异闻商旅奇谭)Another Merchant's Tale",
+    "Guid": "41658b2f-191c-4d68-98c3-c26a10ddce67",
+    "Version": "0.0.0.63",
+    "Author": "RyougiMio",
+    "TerritoryIds": [1317],
+    "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/(异闻商旅奇谭)Another%20Merchant's%20Tale.cs",
+    "UpdateInfo": "Another Merchant's Tale 目前只画到老一"
   }
 
 
 ]
+
 
 
 
