@@ -38,15 +38,16 @@
   {
     "Name": "(异闻商旅奇谭)Another Merchant's Tale",
     "Guid": "41658b2f-191c-4d68-98c3-c26a10ddce67",
-    "Version": "0.0.0.63",
+    "Version": "0.0.0.76",
     "Author": "RyougiMio",
     "TerritoryIds": [1317],
     "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/(异闻商旅奇谭)Another%20Merchant's%20Tale.cs",
-    "UpdateInfo": "Another Merchant's Tale 目前只画到老一"
+    "UpdateInfo": "Another Merchant's Tale 目前粗略的绘制了P1/P3 P3后半暂缺，前半未充分测试"
   }
 
 
 ]
+
 
 
 
