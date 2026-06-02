@@ -350,6 +350,19 @@ namespace RyougiMioScriptNamespace
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
         }
 
+        private void DrawRectFromPositionToTarget(ScriptAccessory accessory, string name, Vector3 position, uint targetId, float width, float length, int duration, Vector4? color = null)
+        {
+            var dp = accessory.Data.GetDefaultDrawProperties();
+            dp.Name = name;
+            dp.Position = position;
+            dp.TargetObject = targetId;
+            dp.Scale = new Vector2(width, length);
+            dp.Color = color ?? accessory.Data.DefaultDangerColor;
+            dp.DestoryAt = duration;
+            dp.ScaleMode = ScaleMode.YByTime;
+            accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
+        }
+
         private void DrawGuide(ScriptAccessory accessory, string name, Vector3 targetPosition, int duration, int delay = 0)
         {
             var dp = accessory.Data.GetDefaultDrawProperties();
@@ -425,6 +438,25 @@ namespace RyougiMioScriptNamespace
 
             if (iconId == "02A2")
                 Alert("玩家头标真", 5000, true);
+        }
+
+        [ScriptMethod(name: "P1 ObjectEffect 64/128 玩家射线", eventType: EventTypeEnum.ObjectEffect, eventCondition: ["Id1:64", "Id2:128"], userControl: true)]
+        public void P1_ObjectEffect64128_PlayerRays(Event @event, ScriptAccessory accessory)
+        {
+            _acc = accessory;
+            _lastMechanicAt = NowMs();
+
+            if (_phase != Phase.P1) return;
+
+            var sourcePosition = @event.SourcePosition;
+            var sourceId = @event.SourceId;
+            const int duration = 5125;
+
+            foreach (var playerId in accessory.Data.PartyList)
+            {
+                var drawName = $"DMU_P1_Obj64128_PlayerRay_{sourceId}_{playerId}_{DateTime.Now.Ticks}";
+                DrawRectFromPositionToTarget(accessory, drawName, sourcePosition, playerId, 6.0f, 100.0f, duration);
+            }
         }
 
         #endregion
