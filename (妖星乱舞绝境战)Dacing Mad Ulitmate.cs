@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Numerics;
+using System.Threading.Tasks;
 using KodakkuAssist.Data;
 using KodakkuAssist.Module.Draw;
 using KodakkuAssist.Module.GameEvent;
@@ -66,6 +67,7 @@ namespace RyougiMioScriptNamespace
         private const uint InvalidObjectId = 0xE0000000;
         private const int MaxLoggedActionIds = 256;
         private static readonly Vector3 ArenaCenter = new Vector3(100.0f, 0.0f, 100.0f);
+        private static readonly Vector4 SolidDangerRed = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
 
         private ScriptAccessory _acc;
         private Phase _phase = Phase.P1;
@@ -73,6 +75,9 @@ namespace RyougiMioScriptNamespace
         private long _lastMechanicAt;
         private bool _p1ObjectEffect64128PlayerRaysDrawn;
         private int _p1ObjectEffect64128Count;
+        private string _p1PendingPlayerTargetIcon = string.Empty;
+        private string _p1PendingBossTargetIcon = string.Empty;
+        private int _p1HeadMarkerPairGeneration;
         private readonly object _lock = new object();
         private readonly HashSet<uint> _seenCasts = new HashSet<uint>();
         private readonly HashSet<uint> _loggedActionIds = new HashSet<uint>();
@@ -89,6 +94,9 @@ namespace RyougiMioScriptNamespace
             _lastMechanicAt = 0;
             _p1ObjectEffect64128PlayerRaysDrawn = false;
             _p1ObjectEffect64128Count = 0;
+            _p1PendingPlayerTargetIcon = string.Empty;
+            _p1PendingBossTargetIcon = string.Empty;
+            _p1HeadMarkerPairGeneration = 0;
 
             lock (_lock)
             {
@@ -238,6 +246,28 @@ namespace RyougiMioScriptNamespace
             return objectId == GetMyId(accessory);
         }
 
+        private static string NormalizeIconId(string iconId)
+        {
+            if (string.IsNullOrWhiteSpace(iconId)) return string.Empty;
+
+            iconId = iconId.Trim();
+            if (iconId.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                iconId = iconId[2..];
+
+            return iconId.ToUpperInvariant().PadLeft(4, '0');
+        }
+
+        private static bool TryGetTargetPlayerId(Event @event, ScriptAccessory accessory, out uint targetId)
+        {
+            targetId = 0;
+            return TryGetTargetId(@event, out targetId) && GetPlayerIndex(accessory, targetId) >= 0;
+        }
+
+        private static string FormatObjectId(uint objectId)
+        {
+            return objectId == 0 ? "-" : objectId.ToString("X8", CultureInfo.InvariantCulture);
+        }
+
         private static Vector3 ExtendGame(Vector3 position, float gameRotation, float length)
         {
             return new Vector3(
@@ -316,12 +346,12 @@ namespace RyougiMioScriptNamespace
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Circle, dp);
         }
 
-        private void DrawRect(Event @event, ScriptAccessory accessory, string name, float width, float length, int duration, Vector4? color = null)
+        private void DrawRect(Event @event, ScriptAccessory accessory, string name, float width, float length, int duration, Vector4? color = null, ScaleMode scaleMode = ScaleMode.YByTime)
         {
-            DrawRect(accessory, name, @event.SourcePosition, @event.SourceRotation, width, length, duration, color);
+            DrawRect(accessory, name, @event.SourcePosition, @event.SourceRotation, width, length, duration, color, scaleMode);
         }
 
-        private void DrawRect(ScriptAccessory accessory, string name, Vector3 position, float rotation, float width, float length, int duration, Vector4? color = null)
+        private void DrawRect(ScriptAccessory accessory, string name, Vector3 position, float rotation, float width, float length, int duration, Vector4? color = null, ScaleMode scaleMode = ScaleMode.YByTime)
         {
             var dp = accessory.Data.GetDefaultDrawProperties();
             dp.Name = name;
@@ -330,16 +360,16 @@ namespace RyougiMioScriptNamespace
             dp.Scale = new Vector2(width, length);
             dp.Color = color ?? accessory.Data.DefaultDangerColor;
             dp.DestoryAt = duration;
-            dp.ScaleMode = ScaleMode.YByTime;
+            dp.ScaleMode = scaleMode;
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Rect, dp);
         }
 
-        private void DrawFan(Event @event, ScriptAccessory accessory, string name, float radius, float radian, int duration, Vector4? color = null)
+        private void DrawFan(Event @event, ScriptAccessory accessory, string name, float radius, float radian, int duration, Vector4? color = null, ScaleMode scaleMode = ScaleMode.ByTime)
         {
-            DrawFan(accessory, name, @event.SourcePosition, @event.SourceRotation, radius, radian, duration, color);
+            DrawFan(accessory, name, @event.SourcePosition, @event.SourceRotation, radius, radian, duration, color, scaleMode);
         }
 
-        private void DrawFan(ScriptAccessory accessory, string name, Vector3 position, float rotation, float radius, float radian, int duration, Vector4? color = null)
+        private void DrawFan(ScriptAccessory accessory, string name, Vector3 position, float rotation, float radius, float radian, int duration, Vector4? color = null, ScaleMode scaleMode = ScaleMode.ByTime)
         {
             var dp = accessory.Data.GetDefaultDrawProperties();
             dp.Name = name;
@@ -349,7 +379,7 @@ namespace RyougiMioScriptNamespace
             dp.Radian = radian;
             dp.Color = color ?? accessory.Data.DefaultDangerColor;
             dp.DestoryAt = duration;
-            dp.ScaleMode = ScaleMode.ByTime;
+            dp.ScaleMode = scaleMode;
             accessory.Method.SendDraw(DrawModeEnum.Default, DrawTypeEnum.Fan, dp);
         }
 
@@ -399,7 +429,7 @@ namespace RyougiMioScriptNamespace
 
         #region P1
 
-        [ScriptMethod(name: "P1 扩大大冰封", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(47768|47771)$"], userControl: true)]
+        [ScriptMethod(name: "P1 扩大大冰封", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(47768|47774)$"], userControl: true)]
         public void P1_ExpandingGreatIcebound(Event @event, ScriptAccessory accessory)
         {
             _acc = accessory;
@@ -414,11 +444,10 @@ namespace RyougiMioScriptNamespace
 
             var duration = Duration(@event) + 125;
             var drawName = $"DMU_P1_扩大大冰封_{actionId}_{sourceId:X8}";
-            var rotation = actionId == 47768 ? @event.SourceRotation + MathF.PI / 2.0f : @event.SourceRotation;
-            DrawFan(accessory, drawName, @event.SourcePosition, rotation, 40.0f, MathF.PI / 2.0f, duration, accessory.Data.DefaultSafeColor);
+            DrawFan(@event, accessory, drawName, 40.0f, MathF.PI / 2.0f, duration, SolidDangerRed, ScaleMode.None);
         }
 
-        [ScriptMethod(name: "P1 劈啪啪暴雷", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(47775|47776|47777)$"], userControl: true)]
+        [ScriptMethod(name: "P1 劈啪啪暴雷", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(47775|47777)$"], userControl: true)]
         public void P1_CracklingThunder(Event @event, ScriptAccessory accessory)
         {
             _acc = accessory;
@@ -433,8 +462,41 @@ namespace RyougiMioScriptNamespace
 
             var duration = Duration(@event) + 125;
             var drawName = $"DMU_P1_劈啪啪暴雷_{actionId}_{sourceId:X8}_{DateTime.Now.Ticks}";
-            var color = actionId == 47776 ? accessory.Data.DefaultSafeColor : accessory.Data.DefaultDangerColor;
-            DrawRect(accessory, drawName, @event.EffectPosition, @event.SourceRotation, 10.0f, 40.0f, duration, color);
+            DrawRect(accessory, drawName, @event.EffectPosition, @event.SourceRotation, 10.0f, 40.0f, duration, SolidDangerRed, ScaleMode.None);
+        }
+
+        [ScriptMethod(name: "P1 记录玩家TargetIcon", eventType: EventTypeEnum.TargetIcon, eventCondition: ["Id:regex:^[0-9A-Fa-f]{4}$"], userControl: false)]
+        public void P1_RecordPlayerTargetIcon(Event @event, ScriptAccessory accessory)
+        {
+            _acc = accessory;
+            _lastMechanicAt = NowMs();
+
+            if (_phase != Phase.P1) return;
+
+            var iconId = NormalizeIconId(@event["Id"]);
+            if (iconId == "02A1" || iconId == "02A2")
+            {
+                DebugEcho(accessory, $"TargetIcon record skip boss-marker icon={iconId}");
+                return;
+            }
+
+            if (!TryGetTargetId(@event, out var targetId))
+            {
+                DebugEcho(accessory, $"TargetIcon record skip no-target icon={iconId}");
+                return;
+            }
+
+            var targetIndex = GetPlayerIndex(accessory, targetId);
+            if (targetIndex < 0)
+            {
+                DebugEcho(accessory, $"TargetIcon record skip non-player icon={iconId} target={FormatObjectId(targetId)}");
+                return;
+            }
+
+            DebugEcho(accessory, $"TargetIcon record player icon={iconId} target={FormatObjectId(targetId)} partyIndex={targetIndex}");
+
+            if (iconId == "007F" || iconId == "0080")
+                CaptureP1HeadMarkerPart(accessory, iconId, true);
         }
 
         [ScriptMethod(name: "P1 玩家头标真假", eventType: EventTypeEnum.TargetIcon, eventCondition: ["Id:regex:^(02A1|02A2)$"], userControl: true)]
@@ -445,15 +507,92 @@ namespace RyougiMioScriptNamespace
 
             if (_phase != Phase.P1) return;
 
-            var iconId = (@event["Id"] ?? string.Empty).ToUpperInvariant();
-            if (iconId == "02A1")
+            var iconId = NormalizeIconId(@event["Id"]);
+            var hasTarget = TryGetTargetId(@event, out var targetId);
+            var targetIndex = hasTarget ? GetPlayerIndex(accessory, targetId) : -1;
+            DebugEcho(accessory, $"HeadMarker boss icon={iconId} target={(hasTarget ? FormatObjectId(targetId) : "-")} partyIndex={targetIndex}");
+            CaptureP1HeadMarkerPart(accessory, iconId, false);
+        }
+
+        private void CaptureP1HeadMarkerPart(ScriptAccessory accessory, string iconId, bool isPlayerIcon)
+        {
+            string call = string.Empty;
+            string debugMessage;
+            int waitGeneration = 0;
+
+            lock (_lock)
             {
-                Alert("玩家头标假", 5000, true);
+                if (isPlayerIcon)
+                    _p1PendingPlayerTargetIcon = iconId;
+                else
+                    _p1PendingBossTargetIcon = iconId;
+
+                _p1HeadMarkerPairGeneration++;
+
+                if (TryGetP1HeadMarkerCall(_p1PendingBossTargetIcon, _p1PendingPlayerTargetIcon, out call))
+                {
+                    debugMessage = $"HeadMarker pair matched playerIcon={_p1PendingPlayerTargetIcon} bossIcon={_p1PendingBossTargetIcon} call={call}";
+                    _p1PendingPlayerTargetIcon = string.Empty;
+                    _p1PendingBossTargetIcon = string.Empty;
+                    _p1HeadMarkerPairGeneration++;
+                }
+                else
+                {
+                    waitGeneration = _p1HeadMarkerPairGeneration;
+                    debugMessage = $"HeadMarker pair pending side={(isPlayerIcon ? "player" : "boss")} icon={iconId} playerIcon={ValueOrDash(_p1PendingPlayerTargetIcon)} bossIcon={ValueOrDash(_p1PendingBossTargetIcon)} generation={waitGeneration}";
+                }
+            }
+
+            DebugEcho(accessory, debugMessage);
+
+            if (!string.IsNullOrWhiteSpace(call))
+            {
+                Alert(call, 5000, true);
                 return;
             }
 
-            if (iconId == "02A2")
-                Alert("玩家头标真", 5000, true);
+            _ = ClearP1HeadMarkerPairAfterDelayAsync(accessory, waitGeneration);
+        }
+
+        private async Task ClearP1HeadMarkerPairAfterDelayAsync(ScriptAccessory accessory, int generation)
+        {
+            await Task.Delay(1000);
+
+            string debugMessage = string.Empty;
+            lock (_lock)
+            {
+                if (_p1HeadMarkerPairGeneration != generation) return;
+
+                if (!string.IsNullOrWhiteSpace(_p1PendingPlayerTargetIcon) || !string.IsNullOrWhiteSpace(_p1PendingBossTargetIcon))
+                {
+                    debugMessage = $"HeadMarker pair timeout playerIcon={ValueOrDash(_p1PendingPlayerTargetIcon)} bossIcon={ValueOrDash(_p1PendingBossTargetIcon)} generation={generation}";
+                    _p1PendingPlayerTargetIcon = string.Empty;
+                    _p1PendingBossTargetIcon = string.Empty;
+                    _p1HeadMarkerPairGeneration++;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(debugMessage))
+                DebugEcho(accessory, debugMessage);
+        }
+
+        private static bool TryGetP1HeadMarkerCall(string bossIconId, string playerIconId, out string call)
+        {
+            call = string.Empty;
+
+            if (bossIconId == "02A2")
+            {
+                if (playerIconId == "0080") call = "分摊";
+                if (playerIconId == "007F") call = "分散";
+            }
+
+            if (bossIconId == "02A1")
+            {
+                if (playerIconId == "007F") call = "分摊";
+                if (playerIconId == "0080") call = "分散";
+            }
+
+            return !string.IsNullOrWhiteSpace(call);
         }
 
         [ScriptMethod(name: "P1 ObjectEffect 64/128 播报与玩家射线", eventType: EventTypeEnum.ObjectEffect, eventCondition: ["Id1:64", "Id2:128"], userControl: true)]
