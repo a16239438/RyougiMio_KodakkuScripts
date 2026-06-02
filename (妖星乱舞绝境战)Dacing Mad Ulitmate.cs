@@ -325,10 +325,15 @@ namespace RyougiMioScriptNamespace
 
         private void DrawFan(Event @event, ScriptAccessory accessory, string name, float radius, float radian, int duration, Vector4? color = null)
         {
+            DrawFan(accessory, name, @event.SourcePosition, @event.SourceRotation, radius, radian, duration, color);
+        }
+
+        private void DrawFan(ScriptAccessory accessory, string name, Vector3 position, float rotation, float radius, float radian, int duration, Vector4? color = null)
+        {
             var dp = accessory.Data.GetDefaultDrawProperties();
             dp.Name = name;
-            dp.Position = @event.SourcePosition;
-            dp.Rotation = @event.SourceRotation;
+            dp.Position = position;
+            dp.Rotation = rotation;
             dp.Scale = new Vector2(radius);
             dp.Radian = radian;
             dp.Color = color ?? accessory.Data.DefaultDangerColor;
@@ -383,7 +388,7 @@ namespace RyougiMioScriptNamespace
 
         #region P1
 
-        [ScriptMethod(name: "P1 扩大大冰封", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(47768|47771|47774)$"], userControl: true)]
+        [ScriptMethod(name: "P1 扩大大冰封", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(47768|47771)$"], userControl: true)]
         public void P1_ExpandingGreatIcebound(Event @event, ScriptAccessory accessory)
         {
             _acc = accessory;
@@ -398,8 +403,8 @@ namespace RyougiMioScriptNamespace
 
             var duration = Duration(@event) + 125;
             var drawName = $"DMU_P1_扩大大冰封_{actionId}_{sourceId:X8}";
-            var color = actionId == 47771 ? accessory.Data.DefaultSafeColor : accessory.Data.DefaultDangerColor;
-            DrawFan(@event, accessory, drawName, 40.0f, MathF.PI / 2.0f, duration, color);
+            var rotation = actionId == 47768 ? @event.SourceRotation + MathF.PI / 2.0f : @event.SourceRotation;
+            DrawFan(accessory, drawName, @event.SourcePosition, rotation, 40.0f, MathF.PI / 2.0f, duration, accessory.Data.DefaultSafeColor);
         }
 
         [ScriptMethod(name: "P1 劈啪啪暴雷", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(47775|47776|47777)$"], userControl: true)]
