@@ -71,6 +71,8 @@ namespace RyougiMioScriptNamespace
         private Phase _phase = Phase.P1;
         private int _generation;
         private long _lastMechanicAt;
+        private bool _p1ObjectEffect64128PlayerRaysDrawn;
+        private int _p1ObjectEffect64128Count;
         private readonly object _lock = new object();
         private readonly HashSet<uint> _seenCasts = new HashSet<uint>();
         private readonly HashSet<uint> _loggedActionIds = new HashSet<uint>();
@@ -85,6 +87,8 @@ namespace RyougiMioScriptNamespace
             _phase = Phase.P1;
             _generation++;
             _lastMechanicAt = 0;
+            _p1ObjectEffect64128PlayerRaysDrawn = false;
+            _p1ObjectEffect64128Count = 0;
 
             lock (_lock)
             {
@@ -277,6 +281,13 @@ namespace RyougiMioScriptNamespace
             return string.IsNullOrWhiteSpace(value) ? "-" : value;
         }
 
+        private static bool IsNear(Vector3 value, Vector3 expected, float tolerance = 0.5f)
+        {
+            return MathF.Abs(value.X - expected.X) <= tolerance
+                && MathF.Abs(value.Y - expected.Y) <= tolerance
+                && MathF.Abs(value.Z - expected.Z) <= tolerance;
+        }
+
         #endregion
 
         #region Draw Helpers
@@ -445,7 +456,7 @@ namespace RyougiMioScriptNamespace
                 Alert("玩家头标真", 5000, true);
         }
 
-        [ScriptMethod(name: "P1 ObjectEffect 64/128 玩家射线", eventType: EventTypeEnum.ObjectEffect, eventCondition: ["Id1:64", "Id2:128"], userControl: true)]
+        [ScriptMethod(name: "P1 ObjectEffect 64/128 播报与玩家射线", eventType: EventTypeEnum.ObjectEffect, eventCondition: ["Id1:64", "Id2:128"], userControl: true)]
         public void P1_ObjectEffect64128_PlayerRays(Event @event, ScriptAccessory accessory)
         {
             _acc = accessory;
@@ -454,6 +465,21 @@ namespace RyougiMioScriptNamespace
             if (_phase != Phase.P1) return;
 
             var sourcePosition = @event.SourcePosition;
+            int count;
+            lock (_lock)
+            {
+                _p1ObjectEffect64128Count++;
+                count = _p1ObjectEffect64128Count;
+            }
+
+            AnnounceP1ObjectEffect64128(sourcePosition, count);
+
+            lock (_lock)
+            {
+                if (_p1ObjectEffect64128PlayerRaysDrawn) return;
+                _p1ObjectEffect64128PlayerRaysDrawn = true;
+            }
+
             var sourceId = @event.SourceId;
             const int duration = 5125;
 
@@ -461,6 +487,33 @@ namespace RyougiMioScriptNamespace
             {
                 var drawName = $"DMU_P1_Obj64128_PlayerRay_{sourceId}_{playerId}_{DateTime.Now.Ticks}";
                 DrawRectFromPositionToTarget(accessory, drawName, sourcePosition, playerId, 6.0f, 100.0f, duration);
+            }
+        }
+
+        private void AnnounceP1ObjectEffect64128(Vector3 sourcePosition, int count)
+        {
+            if (count == 2 || count == 3)
+            {
+                if (IsNear(sourcePosition, new Vector3(116.0f, 6.5f, 43.0f)))
+                {
+                    Alert("右刀", 3000, true);
+                    return;
+                }
+
+                if (IsNear(sourcePosition, new Vector3(92.0f, 15.0f, 27.0f)))
+                    Alert("左刀", 3000, true);
+            }
+
+            if (count == 4)
+            {
+                if (IsNear(sourcePosition, new Vector3(105.25f, 13.5f, 34.0f)))
+                {
+                    Alert("背对", 3000, true);
+                    return;
+                }
+
+                if (IsNear(sourcePosition, new Vector3(95.0f, 12.5f, 25.0f)))
+                    Alert("面对", 3000, true);
             }
         }
 
