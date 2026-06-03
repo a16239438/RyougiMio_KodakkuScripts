@@ -832,12 +832,12 @@ namespace RyougiMioScriptNamespace
             }
             else if (statusId == 4878)
             {
-                rotation = MathF.PI / 2.0f;
+                rotation = -MathF.PI / 2.0f;
                 caseIndex = 3;
             }
             else if (statusId == 4879)
             {
-                rotation = -MathF.PI / 2.0f;
+                rotation = MathF.PI / 2.0f;
                 caseIndex = 4;
             }
             else
