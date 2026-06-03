@@ -13,7 +13,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(妖星乱舞绝境战)Dacing Mad Ulitmate", territorys: [1363], guid: "8041b30e-db21-4687-9175-2903eb7bc94d", version: "0.0.0.1", author: "RyougiMio", note: "初始脚本框架")]
+    [ScriptType(name: "(妖星乱舞绝境战)Dacing Mad Ulitmate", territorys: [1363], guid: "8041b30e-db21-4687-9175-2903eb7bc94d", version: "0.0.0.2", author: "RyougiMio", note: "初始脚本框架")]
     public class Script1363
     {
         #region Settings
