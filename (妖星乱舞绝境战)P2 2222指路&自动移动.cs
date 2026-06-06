@@ -1701,13 +1701,12 @@ namespace RyougiMioScriptNamespace
                 }
             }
 
-            var swapEvenRightAttackAliases = P2TowerStrategySetting == P2TowerStrategy.TN左D右_BBY闲固;
             switch (markType)
             {
                 case MarkType.Attack1: return MarkerAlias.EL1;
                 case MarkType.Attack2: return MarkerAlias.EL2;
-                case MarkType.Attack3: return swapEvenRightAttackAliases ? MarkerAlias.ER2 : MarkerAlias.ER1;
-                case MarkType.Attack4: return swapEvenRightAttackAliases ? MarkerAlias.ER1 : MarkerAlias.ER2;
+                case MarkType.Attack3: return MarkerAlias.ER2;
+                case MarkType.Attack4: return MarkerAlias.ER1;
                 case MarkType.Stop1: return MarkerAlias.EL3;
                 case MarkType.Stop2: return MarkerAlias.EC1;
                 case MarkType.Bind1: return MarkerAlias.ER3;
