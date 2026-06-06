@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.2.4", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.3.0", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -57,7 +57,15 @@ namespace RyougiMioScriptNamespace
         [UserSetting("PR移动等待队列读条/滑步")]
         public bool GreenMoveWaitForQueuedCast { get; set; } = true;
 
-        [UserSetting("P2偶数轮2组顺序")]
+        [UserSetting("P2闲人处理机制时的左右站位")]
+        public P2TowerStrategy P2TowerStrategySetting { get; set; } = P2TowerStrategy.扇左钢右;
+        public enum P2TowerStrategy
+        {
+            扇左钢右,
+            TN左D右_BBY闲固,
+        }
+
+        [UserSetting("P2偶数轮闲人组站位")]
         public EvenGroup2PriorityMode EvenGroup2PrioritySetting { get; set; } = EvenGroup2PriorityMode.近南远北;
         public enum EvenGroup2PriorityMode
         {
@@ -142,7 +150,7 @@ namespace RyougiMioScriptNamespace
         private const int EnvBigCircleGuideDuration = 60000;
         private const int EnvBigCircleTargetIconUpdateCount = 4;
         private const int EnvBigCircleLastRound = 8;
-        private const int EnvBigCircleLastRoundGuideDuration = 10000;
+        private const int EnvBigCircleLastRoundGuideDuration = 12000;
         private const int CommandMarkDelayMs = 4500;
         private const int CommandMarkDurationMs = 4500;
         private const float EnvBigCircleDistance = 8.0f;
@@ -1155,6 +1163,37 @@ namespace RyougiMioScriptNamespace
             return EvenGroup2PrioritySetting == EvenGroup2PriorityMode.近北远南;
         }
 
+        private bool IsTnPartyIndex(int partyIndex)
+        {
+            return partyIndex >= 0 && partyIndex <= 3;
+        }
+
+        private bool IsDpsPartyIndex(int partyIndex)
+        {
+            return partyIndex >= 4 && partyIndex <= 7;
+        }
+
+        private bool TryGetPreviousRoundNineOrder(ScriptAccessory accessory, int round, IEnumerable<int> partyIndexes, out List<int> ordered)
+        {
+            ordered = null;
+            if (!TryGetEnvBigCircleRoundTwelveDirection(round - 1, out var previousRoundTwelveDirection))
+            {
+                DebugEcho(accessory, $"Env big circle round {round}: previous round twelve direction not ready for near 9 order");
+                return false;
+            }
+
+            ordered = PartyIndexesByClockCloseness(accessory, partyIndexes, previousRoundTwelveDirection, 9.0f);
+            return true;
+        }
+
+        private string FormatClockClosenessForPreviousRound(ScriptAccessory accessory, int round, int partyIndex, float clockHour)
+        {
+            if (!TryGetEnvBigCircleRoundTwelveDirection(round - 1, out var previousRoundTwelveDirection))
+                return $"{PartyPriorityLabel(partyIndex)}=missing-direction";
+
+            return FormatClockCloseness(accessory, partyIndex, previousRoundTwelveDirection, clockHour);
+        }
+
         private void SwapActiveTargetIconGroupsLocked()
         {
             var oldGroup1 = _activeTargetIconGroup1.ToList();
@@ -1183,7 +1222,7 @@ namespace RyougiMioScriptNamespace
 
             var ok = round % 2 == 1
                 ? AssignOddRoundMarkerVariablesLocked(accessory, round, newTwelveDirection)
-                : AssignEvenRoundMarkerVariablesLocked(round);
+                : AssignEvenRoundMarkerVariablesLocked(accessory, round);
 
             roundMarks = new MarkType?[_roundMarkByPartyIndex.Length];
             Array.Copy(_roundMarkByPartyIndex, roundMarks, _roundMarkByPartyIndex.Length);
@@ -1280,7 +1319,15 @@ namespace RyougiMioScriptNamespace
             return true;
         }
 
-        private bool AssignEvenRoundMarkerVariablesLocked(int round)
+        private bool AssignEvenRoundMarkerVariablesLocked(ScriptAccessory accessory, int round)
+        {
+            if (P2TowerStrategySetting == P2TowerStrategy.TN左D右_BBY闲固)
+                return AssignEvenRoundMarkerVariablesTnLeftDRightLocked(accessory, round);
+
+            return AssignEvenRoundMarkerVariablesFanLeftSteelRightLocked(round);
+        }
+
+        private bool AssignEvenRoundMarkerVariablesFanLeftSteelRightLocked(int round)
         {
             var group1Cd = PartyIndexesByIcon(_activeTargetIconGroup1, TargetIcon02CD);
             var group1Cc = PartyIndexesByIcon(_activeTargetIconGroup1, TargetIcon02CC);
@@ -1301,6 +1348,30 @@ namespace RyougiMioScriptNamespace
                 AssignMarkerVariablesByPriority(group2Cd, reverseGroup2Priority, MarkType.Stop1, MarkType.Stop2);
                 AssignMarkerVariablesByPriority(group2Cc, reverseGroup2Priority, MarkType.Bind1, MarkType.Bind2);
             }
+
+            return true;
+        }
+
+        private bool AssignEvenRoundMarkerVariablesTnLeftDRightLocked(ScriptAccessory accessory, int round)
+        {
+            var group1Cd = PartyIndexesByIcon(_activeTargetIconGroup1, TargetIcon02CD);
+            var group1Cc = PartyIndexesByIcon(_activeTargetIconGroup1, TargetIcon02CC);
+
+            if (!TryGetPreviousRoundNineOrder(accessory, round, group1Cd, out var group1CdByNine))
+                return false;
+            if (!TryGetPreviousRoundNineOrder(accessory, round, group1Cc, out var group1CcByNine))
+                return false;
+
+            DebugEcho(accessory, $"Env big circle round {round}: even G1 02CD previous round near 9 order: {string.Join(", ", group1CdByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
+            DebugEcho(accessory, $"Env big circle round {round}: even G1 02CC previous round near 9 order: {string.Join(", ", group1CcByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
+
+            AssignMarkerVariable(MarkType.Attack1, group1CdByNine.Count > 0 ? group1CdByNine[0] : -1);
+            AssignMarkerVariable(MarkType.Attack2, group1CdByNine.Count > 1 ? group1CdByNine[1] : -1);
+            AssignMarkerVariable(MarkType.Attack3, group1CcByNine.Count > 0 ? group1CcByNine[0] : -1);
+            AssignMarkerVariable(MarkType.Attack4, group1CcByNine.Count > 1 ? group1CcByNine[1] : -1);
+
+            AssignMarkerVariables(_activeTargetIconGroup2.Where(IsTnPartyIndex), MarkType.Stop1, MarkType.Stop2);
+            AssignMarkerVariables(_activeTargetIconGroup2.Where(IsDpsPartyIndex), MarkType.Bind1, MarkType.Bind2);
 
             return true;
         }
