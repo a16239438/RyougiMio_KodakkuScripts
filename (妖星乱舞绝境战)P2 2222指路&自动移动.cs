@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.2.3", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.2.4", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -1787,7 +1787,7 @@ namespace RyougiMioScriptNamespace
                 SolidSafeGreen,
                 ScaleMode.None);
             DrawGuide(accessory, $"{DrawPrefix}_EnvBigCircleRound_{round}_OE_Guide_To_{oeAlias}", oePosition, duration);
-            DrawGuideBetweenPositions(accessory, $"{DrawPrefix}_EnvBigCircleRound_{round}_OE_Guide_{oeAlias}_To_{finalAlias}", oePosition, finalPosition, duration);
+            DrawInactiveGuideBetweenPositions(accessory, $"{DrawPrefix}_EnvBigCircleRound_{round}_OE_Guide_{oeAlias}_To_{finalAlias}", oePosition, finalPosition, duration);
             SaveActiveOuterEdgeGuide(round, finalAlias, finalPosition, duration, true);
             GreenMoveToPoint(oePosition, accessory, $"round {round} {oeAlias}");
             DebugEcho(accessory, $"Env big circle round {round}: outer edge relay {oeAlias}->{finalAlias}");
@@ -2099,6 +2099,11 @@ namespace RyougiMioScriptNamespace
             dp.Delay = delay;
             dp.DestoryAt = duration;
             accessory.Method.SendDraw(DrawModeEnum.Imgui, DrawTypeEnum.Displacement, dp);
+        }
+
+        private void DrawInactiveGuideBetweenPositions(ScriptAccessory accessory, string name, Vector3 sourcePosition, Vector3 targetPosition, int duration, int delay = 0)
+        {
+            DrawGuideBetweenPositions(accessory, name, sourcePosition, targetPosition, duration, delay, accessory.Data.DefaultDangerColor);
         }
 
         #endregion
