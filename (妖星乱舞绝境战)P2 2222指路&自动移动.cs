@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.3.3", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.3.5", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -35,6 +35,9 @@ namespace RyougiMioScriptNamespace
 
         [UserSetting("指挥模式（开启后允许脚本给全员上头标）")]
         public bool EnableCommandMode { get; set; } = false;
+
+        [UserSetting("指挥模式头标显示秒数（0-9）")]
+        public float CommandMarkDisplaySeconds { get; set; } = 4.5f;
 
         [UserSetting("启用PR GreenMove自动移动")]
         public bool EnableGreenMove { get; set; } = false;
@@ -151,8 +154,8 @@ namespace RyougiMioScriptNamespace
         private const int EnvBigCircleTargetIconUpdateCount = 4;
         private const int EnvBigCircleLastRound = 8;
         private const int EnvBigCircleLastRoundGuideDuration = 12000;
-        private const int CommandMarkDelayMs = 4500;
-        private const int CommandMarkDurationMs = 4500;
+        private const int CommandMarkWindowMs = 9000;
+        private const float DefaultCommandMarkDisplaySeconds = 4.5f;
         private const float EnvBigCircleDistance = 8.0f;
         private const float EnvBigCircleRadius = 4.0f;
         private const float EnvMarkerCircleRadius = 0.25f;
@@ -740,6 +743,22 @@ namespace RyougiMioScriptNamespace
             }
         }
 
+        private (int DelayMs, int DurationMs) GetCommandMarkTiming()
+        {
+            var displaySeconds = CommandMarkDisplaySeconds;
+            if (float.IsNaN(displaySeconds) || float.IsInfinity(displaySeconds))
+                displaySeconds = DefaultCommandMarkDisplaySeconds;
+
+            if (displaySeconds < 0.0f)
+                displaySeconds = 0.0f;
+            else if (displaySeconds > CommandMarkWindowMs / 1000.0f)
+                displaySeconds = CommandMarkWindowMs / 1000.0f;
+
+            var durationMs = (int)Math.Round(displaySeconds * 1000.0f, MidpointRounding.AwayFromZero);
+            durationMs = Math.Max(0, Math.Min(CommandMarkWindowMs, durationMs));
+            return (CommandMarkWindowMs - durationMs, durationMs);
+        }
+
         private int BeginCommandMarkWait(ScriptAccessory accessory, string context, int assignedCount, int totalCount, int delayMs, int durationMs)
         {
             var generation = Interlocked.Increment(ref _roundCommandMarkGeneration);
@@ -843,7 +862,13 @@ namespace RyougiMioScriptNamespace
 
                 var roundMarksSnapshot = roundMarks.ToArray();
                 var context = $"Env big circle round {round}";
-                var generation = BeginCommandMarkWait(accessory, context, roundMarksSnapshot.Count(mark => mark.HasValue), roundMarksSnapshot.Length, CommandMarkDelayMs, CommandMarkDurationMs);
+                var (delayMs, durationMs) = GetCommandMarkTiming();
+                var generation = BeginCommandMarkWait(accessory, context, roundMarksSnapshot.Count(mark => mark.HasValue), roundMarksSnapshot.Length, delayMs, durationMs);
+                if (durationMs <= 0)
+                {
+                    DebugEcho(accessory, $"{context}: command mark display duration is 0ms, apply skipped generation={generation}");
+                    return;
+                }
 
                 Timer timer = null;
                 timer = new Timer(_ =>
@@ -862,9 +887,9 @@ namespace RyougiMioScriptNamespace
                             return;
                         }
 
-                        DebugEcho(accessory, $"{context}: command mark wait done, apply duration={CommandMarkDurationMs}ms generation={generation}");
+                        DebugEcho(accessory, $"{context}: command mark wait done, apply duration={durationMs}ms generation={generation}");
                         CommandMarkRoundMarkers(accessory, round, roundMarksSnapshot);
-                        ScheduleCommandMarkClear(accessory, context, generation, CommandMarkDurationMs);
+                        ScheduleCommandMarkClear(accessory, context, generation, durationMs);
                     }
                     catch (Exception ex)
                     {
@@ -880,7 +905,7 @@ namespace RyougiMioScriptNamespace
 
                         timer?.Dispose();
                     }
-                }, null, CommandMarkDelayMs, Timeout.Infinite);
+                }, null, delayMs, Timeout.Infinite);
 
                 ReplaceCommandMarkTimer(timer);
             }
