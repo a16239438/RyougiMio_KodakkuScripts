@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.3.1", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.3.3", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -1163,6 +1163,12 @@ namespace RyougiMioScriptNamespace
             return EvenGroup2PrioritySetting == EvenGroup2PriorityMode.近北远南;
         }
 
+        private void AssignTnDpsGroup2MarkerVariables(bool reversePriority)
+        {
+            AssignMarkerVariablesByPriority(_activeTargetIconGroup2.Where(IsTnPartyIndex), reversePriority, MarkType.Stop1, MarkType.Stop2);
+            AssignMarkerVariablesByPriority(_activeTargetIconGroup2.Where(IsDpsPartyIndex), reversePriority, MarkType.Bind1, MarkType.Bind2);
+        }
+
         private bool IsTnPartyIndex(int partyIndex)
         {
             return partyIndex >= 0 && partyIndex <= 3;
@@ -1315,8 +1321,7 @@ namespace RyougiMioScriptNamespace
 
             if (P2TowerStrategySetting == P2TowerStrategy.TN左D右_BBY闲固)
             {
-                AssignMarkerVariables(_activeTargetIconGroup2.Where(IsTnPartyIndex), MarkType.Stop1, MarkType.Stop2);
-                AssignMarkerVariables(_activeTargetIconGroup2.Where(IsDpsPartyIndex), MarkType.Bind1, MarkType.Bind2);
+                AssignTnDpsGroup2MarkerVariables(false);
             }
             else
             {
@@ -1378,8 +1383,7 @@ namespace RyougiMioScriptNamespace
             AssignMarkerVariable(MarkType.Attack3, group1CcByNine.Count > 0 ? group1CcByNine[0] : -1);
             AssignMarkerVariable(MarkType.Attack4, group1CcByNine.Count > 1 ? group1CcByNine[1] : -1);
 
-            AssignMarkerVariables(_activeTargetIconGroup2.Where(IsTnPartyIndex), MarkType.Stop1, MarkType.Stop2);
-            AssignMarkerVariables(_activeTargetIconGroup2.Where(IsDpsPartyIndex), MarkType.Bind1, MarkType.Bind2);
+            AssignTnDpsGroup2MarkerVariables(UseReverseEvenGroup2Priority());
 
             return true;
         }
