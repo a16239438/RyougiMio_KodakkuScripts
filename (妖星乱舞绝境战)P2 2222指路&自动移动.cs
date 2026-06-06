@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.3.5", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.3.6", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -161,7 +161,7 @@ namespace RyougiMioScriptNamespace
         private const float EnvMarkerCircleRadius = 0.25f;
         private const float EnvOuterEdgeGuideDistance = 7.0f;
         private const float EnvOddLeftGreenOffset = 3.25f;
-        private const float EnvOddLeftRedSixOffset = 4.75f;
+        private const float EnvOddLeftRedSixOffset = 5.0f;
         private const float EnvInnerMarkerOffset = EnvBigCircleRadius - EnvMarkerCircleRadius;
         private const float EnvOuterMarkerOffset = EnvBigCircleRadius + EnvMarkerCircleRadius;
         private const float EnvCenterCircleRadius = 6.0f;
@@ -1683,7 +1683,7 @@ namespace RyougiMioScriptNamespace
                 : EnvBigCircleGuideDuration;
         }
 
-        private static MarkerAlias MarkerAliasForRoundMark(MarkType markType, bool oddRound)
+        private MarkerAlias MarkerAliasForRoundMark(MarkType markType, bool oddRound)
         {
             if (oddRound)
             {
@@ -1701,12 +1701,13 @@ namespace RyougiMioScriptNamespace
                 }
             }
 
+            var swapEvenRightAttackAliases = P2TowerStrategySetting == P2TowerStrategy.TN左D右_BBY闲固;
             switch (markType)
             {
                 case MarkType.Attack1: return MarkerAlias.EL1;
                 case MarkType.Attack2: return MarkerAlias.EL2;
-                case MarkType.Attack3: return MarkerAlias.ER1;
-                case MarkType.Attack4: return MarkerAlias.ER2;
+                case MarkType.Attack3: return swapEvenRightAttackAliases ? MarkerAlias.ER2 : MarkerAlias.ER1;
+                case MarkType.Attack4: return swapEvenRightAttackAliases ? MarkerAlias.ER1 : MarkerAlias.ER2;
                 case MarkType.Stop1: return MarkerAlias.EL3;
                 case MarkType.Stop2: return MarkerAlias.EC1;
                 case MarkType.Bind1: return MarkerAlias.ER3;
