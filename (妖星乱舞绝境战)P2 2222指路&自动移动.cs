@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.2.2", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.2.3", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -56,6 +56,14 @@ namespace RyougiMioScriptNamespace
 
         [UserSetting("PR移动等待队列读条/滑步")]
         public bool GreenMoveWaitForQueuedCast { get; set; } = true;
+
+        [UserSetting("P2偶数轮2组顺序")]
+        public EvenGroup2PriorityMode EvenGroup2PrioritySetting { get; set; } = EvenGroup2PriorityMode.近南远北;
+        public enum EvenGroup2PriorityMode
+        {
+            近南远北,
+            近北远南,
+        }
 
         [UserSetting("Developer mode")]
         public bool DeveloperMode { get; set; } = false;
@@ -208,6 +216,8 @@ namespace RyougiMioScriptNamespace
         private readonly object _envBigCircleLock = new object();
         private readonly List<int> _pendingEnvBigCircleIndexes = new List<int>();
         private readonly HashSet<int> _pendingEnvBigCircleTargetIconUpdates = new HashSet<int>();
+        private readonly Vector3[] _envBigCircleRoundTwelveDirections = new Vector3[EnvBigCircleLastRound + 1];
+        private readonly bool[] _envBigCircleRoundTwelveDirectionReady = new bool[EnvBigCircleLastRound + 1];
         private int _envBigCircleRound;
         private int _pendingEnvBigCircleRoundToStart;
         private int _pendingEnvBigCircleFirstIndexToStart;
@@ -291,6 +301,8 @@ namespace RyougiMioScriptNamespace
             {
                 _pendingEnvBigCircleIndexes.Clear();
                 ClearPendingEnvBigCircleRoundStartLocked();
+                Array.Clear(_envBigCircleRoundTwelveDirections, 0, _envBigCircleRoundTwelveDirections.Length);
+                Array.Clear(_envBigCircleRoundTwelveDirectionReady, 0, _envBigCircleRoundTwelveDirectionReady.Length);
                 _envBigCircleRound = 0;
             }
 
@@ -356,6 +368,32 @@ namespace RyougiMioScriptNamespace
             _envBigCircleRound = _pendingEnvBigCircleRoundToStart;
             ClearPendingEnvBigCircleRoundStartLocked();
             return true;
+        }
+
+        private void StoreEnvBigCircleRoundTwelveDirection(int round, Vector3 newTwelveDirection)
+        {
+            if (round < 0 || round >= _envBigCircleRoundTwelveDirections.Length) return;
+
+            lock (_envBigCircleLock)
+            {
+                _envBigCircleRoundTwelveDirections[round] = newTwelveDirection;
+                _envBigCircleRoundTwelveDirectionReady[round] = true;
+            }
+        }
+
+        private bool TryGetEnvBigCircleRoundTwelveDirection(int round, out Vector3 newTwelveDirection)
+        {
+            newTwelveDirection = default;
+            if (round < 0 || round >= _envBigCircleRoundTwelveDirections.Length) return false;
+
+            lock (_envBigCircleLock)
+            {
+                if (!_envBigCircleRoundTwelveDirectionReady[round])
+                    return false;
+
+                newTwelveDirection = _envBigCircleRoundTwelveDirections[round];
+                return true;
+            }
         }
 
         private bool TryCollectTargetIconAndStartEnvBigCircleRound(
@@ -1099,9 +1137,22 @@ namespace RyougiMioScriptNamespace
 
         private void AssignMarkerVariables(IEnumerable<int> partyIndexes, params MarkType[] markTypes)
         {
+            AssignMarkerVariablesByPriority(partyIndexes, false, markTypes);
+        }
+
+        private void AssignMarkerVariablesByPriority(IEnumerable<int> partyIndexes, bool reversePriority, params MarkType[] markTypes)
+        {
             var ordered = partyIndexes.OrderBy(index => index).ToList();
+            if (reversePriority)
+                ordered.Reverse();
+
             for (var i = 0; i < ordered.Count && i < markTypes.Length; i++)
                 AssignMarkerVariable(markTypes[i], ordered[i]);
+        }
+
+        private bool UseReverseEvenGroup2Priority()
+        {
+            return EvenGroup2PrioritySetting == EvenGroup2PriorityMode.近北远南;
         }
 
         private void SwapActiveTargetIconGroupsLocked()
@@ -1203,13 +1254,19 @@ namespace RyougiMioScriptNamespace
             }
             else
             {
+                if (!TryGetEnvBigCircleRoundTwelveDirection(round - 1, out var previousRoundTwelveDirection))
+                {
+                    DebugEcho(accessory, $"Env big circle round {round}: previous round twelve direction not ready for 02CB near 9 order");
+                    return false;
+                }
+
                 var cbByNine = PartyIndexesByClockCloseness(
                     accessory,
                     PartyIndexesByIcon(_activeTargetIconGroup1, TargetIcon02CB),
-                    newTwelveDirection,
+                    previousRoundTwelveDirection,
                     9.0f);
 
-                DebugEcho(accessory, $"Env big circle round {round}: odd G1 02CB near 9 order: {string.Join(", ", cbByNine.Select(index => FormatClockCloseness(accessory, index, newTwelveDirection, 9.0f)))}");
+                DebugEcho(accessory, $"Env big circle round {round}: odd G1 02CB previous round near 9 order: {string.Join(", ", cbByNine.Select(index => FormatClockCloseness(accessory, index, previousRoundTwelveDirection, 9.0f)))}");
 
                 AssignMarkerVariable(MarkType.Attack1, cbByNine.Count > 0 ? cbByNine[0] : -1);
                 AssignMarkerVariable(MarkType.Attack2, cd);
@@ -1233,15 +1290,16 @@ namespace RyougiMioScriptNamespace
             AssignMarkerVariables(group1Cd, MarkType.Attack1, MarkType.Attack2);
             AssignMarkerVariables(group1Cc, MarkType.Attack3, MarkType.Attack4);
 
+            var reverseGroup2Priority = UseReverseEvenGroup2Priority();
             if (round == EnvBigCircleLastRound)
             {
-                AssignMarkerVariables(_activeTargetIconGroup2.Where(index => _initialGroup2TargetIconByPartyIndex[index] == TargetIcon02CD), MarkType.Stop1, MarkType.Stop2);
-                AssignMarkerVariables(_activeTargetIconGroup2.Where(index => _initialGroup2TargetIconByPartyIndex[index] == TargetIcon02CC), MarkType.Bind1, MarkType.Bind2);
+                AssignMarkerVariablesByPriority(_activeTargetIconGroup2.Where(index => _initialGroup2TargetIconByPartyIndex[index] == TargetIcon02CD), reverseGroup2Priority, MarkType.Stop1, MarkType.Stop2);
+                AssignMarkerVariablesByPriority(_activeTargetIconGroup2.Where(index => _initialGroup2TargetIconByPartyIndex[index] == TargetIcon02CC), reverseGroup2Priority, MarkType.Bind1, MarkType.Bind2);
             }
             else
             {
-                AssignMarkerVariables(group2Cd, MarkType.Stop1, MarkType.Stop2);
-                AssignMarkerVariables(group2Cc, MarkType.Bind1, MarkType.Bind2);
+                AssignMarkerVariablesByPriority(group2Cd, reverseGroup2Priority, MarkType.Stop1, MarkType.Stop2);
+                AssignMarkerVariablesByPriority(group2Cc, reverseGroup2Priority, MarkType.Bind1, MarkType.Bind2);
             }
 
             return true;
@@ -1854,6 +1912,7 @@ namespace RyougiMioScriptNamespace
             var firstCenter = GetEnvBigCircleCenter(firstIndex);
             var secondCenter = GetEnvBigCircleCenter(secondIndex);
             GetRoundDirections(firstCenter, secondCenter, out var newTwelveDirection, out var newRightDirection);
+            StoreEnvBigCircleRoundTwelveDirection(round, newTwelveDirection);
             SortEnvBigCirclesByRoundSide(firstIndex, secondIndex, newRightDirection, out var leftIndex, out var leftCenter, out var rightIndex, out var rightCenter);
             ClearActiveOuterEdgeGuideState();
 
