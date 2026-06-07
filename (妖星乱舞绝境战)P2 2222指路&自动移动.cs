@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.6", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.7", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -1414,18 +1414,28 @@ namespace RyougiMioScriptNamespace
             if (P2TowerStrategySetting == P2TowerStrategy.TN左D右_BBY闲固)
                 return AssignEvenRoundMarkerVariablesTnLeftDRightLocked(accessory, round);
 
-            return AssignEvenRoundMarkerVariablesFanLeftSteelRightLocked(round);
+            return AssignEvenRoundMarkerVariablesFanLeftSteelRightLocked(accessory, round);
         }
 
-        private bool AssignEvenRoundMarkerVariablesFanLeftSteelRightLocked(int round)
+        private bool AssignEvenRoundMarkerVariablesFanLeftSteelRightLocked(ScriptAccessory accessory, int round)
         {
             var group1Cd = PartyIndexesByIcon(_activeTargetIconGroup1, TargetIcon02CD);
             var group1Cc = PartyIndexesByIcon(_activeTargetIconGroup1, TargetIcon02CC);
             var group2Cd = PartyIndexesByIcon(_activeTargetIconGroup2, TargetIcon02CD);
             var group2Cc = PartyIndexesByIcon(_activeTargetIconGroup2, TargetIcon02CC);
 
-            AssignMarkerVariables(group1Cd, MarkType.Attack1, MarkType.Attack2);
-            AssignMarkerVariables(group1Cc, MarkType.Attack3, MarkType.Attack4);
+            if (!TryGetPreviousRoundNineOrder(accessory, round, group1Cd, out var group1CdByNine))
+                return false;
+            if (!TryGetPreviousRoundNineOrder(accessory, round, group1Cc, out var group1CcByNine))
+                return false;
+
+            DebugEcho(accessory, $"Env big circle round {round}: even fan-left G1 02CD previous round near 9 order: {string.Join(", ", group1CdByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
+            DebugEcho(accessory, $"Env big circle round {round}: even fan-left G1 02CC previous round near 9 order: {string.Join(", ", group1CcByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
+
+            AssignMarkerVariable(MarkType.Attack1, group1CdByNine.Count > 0 ? group1CdByNine[0] : -1);
+            AssignMarkerVariable(MarkType.Attack2, group1CdByNine.Count > 1 ? group1CdByNine[1] : -1);
+            AssignMarkerVariable(MarkType.Attack3, group1CcByNine.Count > 0 ? group1CcByNine[0] : -1);
+            AssignMarkerVariable(MarkType.Attack4, group1CcByNine.Count > 1 ? group1CcByNine[1] : -1);
 
             var reverseGroup2Priority = UseReverseEvenGroup2Priority();
             if (round == EnvBigCircleLastRound)
