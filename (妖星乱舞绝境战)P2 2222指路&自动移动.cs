@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.3.7", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.1", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -74,6 +74,14 @@ namespace RyougiMioScriptNamespace
         {
             近南远北,
             近北远南,
+        }
+
+        [UserSetting("P2第八轮OE处理")]
+        public P2LastRoundOuterEdgeMode P2LastRoundOuterEdgeSetting { get; set; } = P2LastRoundOuterEdgeMode.配置A_默认站位;
+        public enum P2LastRoundOuterEdgeMode
+        {
+            配置A_默认站位,
+            配置B_固定去A,
         }
 
         [UserSetting("Developer mode")]
@@ -153,13 +161,17 @@ namespace RyougiMioScriptNamespace
         private const int EnvBigCircleGuideDuration = 60000;
         private const int EnvBigCircleTargetIconUpdateCount = 4;
         private const int EnvBigCircleLastRound = 8;
-        private const int EnvBigCircleLastRoundGuideDuration = 12000;
+        private const int EnvBigCircleLastRoundStartDelayMs = 650;
+        private const int EnvBigCircleLastRoundGuideDuration = 11000;
+        private const int EnvBigCircleLastRoundResolveGuideDuration = 5000;
         private const int CommandMarkWindowMs = 9000;
         private const float DefaultCommandMarkDisplaySeconds = 4.5f;
         private const float EnvBigCircleDistance = 8.0f;
         private const float EnvBigCircleRadius = 4.0f;
         private const float EnvMarkerCircleRadius = 0.25f;
-        private const float EnvOuterEdgeGuideDistance = 7.0f;
+        private const float EnvOuterEdgeGuideDistance = 8.0f;
+        private const float EnvLastRoundDefaultOe3Distance = 8.0f;
+        private const float EnvLastRoundDefaultOe4Distance = 6.0f;
         private const float EnvOddLeftGreenOffset = 3.25f;
         private const float EnvOddLeftRedSixOffset = 5.0f;
         private const float EnvInnerMarkerOffset = EnvBigCircleRadius - EnvMarkerCircleRadius;
@@ -167,6 +179,8 @@ namespace RyougiMioScriptNamespace
         private const float EnvCenterCircleRadius = 6.0f;
         private const float EnvCenterOuterMarkerOffset = EnvCenterCircleRadius + EnvMarkerCircleRadius;
         private static readonly Vector3 ArenaCenter = new Vector3(100.0f, 0.0f, 100.0f);
+        private static readonly Vector3 EnvLastRoundFixedOe5Position = new Vector3(100.0f, 0.0f, 92.0f);
+        private static readonly Vector3 EnvLastRoundFixedOe6Position = new Vector3(100.0f, 0.0f, 106.0f);
         private static readonly Vector3 DefaultNorth = new Vector3(0.0f, 0.0f, -1.0f);
         private static readonly Vector4 SolidDangerRed = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
         private static readonly Vector4 SolidSafeGreen = new Vector4(0.0f, 1.0f, 0.0f, 1.0f);
@@ -246,11 +260,27 @@ namespace RyougiMioScriptNamespace
         private Vector3 _activeOuterEdgeGuideFinalPosition;
         private int _activeOuterEdgeGuideDuration;
         private bool _activeOuterEdgeGuideHasFinalPosition;
+        private bool _activeOuterEdgeGuideUseLastRoundConfig;
+        private P2LastRoundOuterEdgeMode _activeOuterEdgeGuideLastRoundMode = P2LastRoundOuterEdgeMode.配置A_默认站位;
+        private Vector3 _activeOuterEdgeGuideTwelveDirection;
 
         private readonly object _buffLock = new object();
         private readonly int[] _buffByPartyIndex = new int[8];
         private int _buffCount;
         private readonly AutoResetEvent _buffReady = new AutoResetEvent(false);
+
+        private sealed class EnvBigCircleRoundPlan
+        {
+            public int Round;
+            public int FirstIndex;
+            public int SecondIndex;
+            public int LeftIndex;
+            public int RightIndex;
+            public Vector3 LeftCenter;
+            public Vector3 RightCenter;
+            public Vector3 NewTwelveDirection;
+            public MarkType?[] RoundMarks;
+        }
 
         #endregion
 
@@ -696,6 +726,9 @@ namespace RyougiMioScriptNamespace
                 _activeOuterEdgeGuideFinalPosition = default;
                 _activeOuterEdgeGuideDuration = 0;
                 _activeOuterEdgeGuideHasFinalPosition = false;
+                _activeOuterEdgeGuideUseLastRoundConfig = false;
+                _activeOuterEdgeGuideLastRoundMode = P2LastRoundOuterEdgeMode.配置A_默认站位;
+                _activeOuterEdgeGuideTwelveDirection = default;
             }
         }
 
@@ -732,6 +765,25 @@ namespace RyougiMioScriptNamespace
                 ? newTwelveDirection
                 : -newTwelveDirection;
             return ArenaCenter + direction * EnvOuterEdgeGuideDistance;
+        }
+
+        private static Vector3 LastRoundDefaultOuterEdgeInitialPosition(Vector3 newTwelveDirection)
+        {
+            return ArenaCenter - newTwelveDirection * EnvLastRoundDefaultOe3Distance;
+        }
+
+        private static Vector3 LastRoundDefaultOuterEdgeResolvePosition(Vector3 newTwelveDirection, uint bossOuterEdgeActionId)
+        {
+            return bossOuterEdgeActionId == BossOuterEdgeNorthActionId
+                ? ArenaCenter + newTwelveDirection * EnvLastRoundDefaultOe4Distance
+                : LastRoundDefaultOuterEdgeInitialPosition(newTwelveDirection);
+        }
+
+        private static Vector3 LastRoundFixedOuterEdgeResolvePosition(uint bossOuterEdgeActionId)
+        {
+            return bossOuterEdgeActionId == BossOuterEdgeNorthActionId
+                ? EnvLastRoundFixedOe6Position
+                : EnvLastRoundFixedOe5Position;
         }
 
         private void ReplaceCommandMarkTimer(Timer timer)
@@ -1925,6 +1977,62 @@ namespace RyougiMioScriptNamespace
             DebugEcho(accessory, $"Env big circle round {round}: outer edge guide {oeAlias}");
         }
 
+        private void DrawLastRoundOuterEdgeInitialGuide(
+            ScriptAccessory accessory,
+            int round,
+            Vector3 newTwelveDirection,
+            P2LastRoundOuterEdgeMode mode,
+            int duration)
+        {
+            var oeAlias = mode == P2LastRoundOuterEdgeMode.配置B_固定去A ? "OE5" : "OE3";
+            var oePosition = mode == P2LastRoundOuterEdgeMode.配置B_固定去A
+                ? EnvLastRoundFixedOe5Position
+                : LastRoundDefaultOuterEdgeInitialPosition(newTwelveDirection);
+
+            DrawCircle(
+                accessory,
+                $"{DrawPrefix}_EnvBigCircleRound_{round}_OE_{oeAlias}_Circle",
+                oePosition,
+                EnvMarkerCircleRadius,
+                duration,
+                0,
+                SolidSafeGreen,
+                ScaleMode.None);
+            DrawGuide(accessory, $"{DrawPrefix}_EnvBigCircleRound_{round}_OE_Guide_To_{oeAlias}", oePosition, duration);
+            SaveActiveLastRoundOuterEdgeGuide(round, mode, newTwelveDirection, duration);
+            GreenMoveToPoint(oePosition, accessory, $"round {round} {oeAlias}");
+            DebugEcho(accessory, $"Env big circle round {round}: last round outer edge initial guide {oeAlias} mode={mode}");
+        }
+
+        private void DrawLastRoundOuterEdgeResolveGuide(
+            ScriptAccessory accessory,
+            int round,
+            P2LastRoundOuterEdgeMode mode,
+            Vector3 newTwelveDirection,
+            uint bossOuterEdgeActionId)
+        {
+            var northOuterEdge = bossOuterEdgeActionId == BossOuterEdgeNorthActionId;
+            var oeAlias = mode == P2LastRoundOuterEdgeMode.配置B_固定去A
+                ? (northOuterEdge ? "OE6" : "OE5")
+                : (northOuterEdge ? "OE4" : "OE3");
+            var oePosition = mode == P2LastRoundOuterEdgeMode.配置B_固定去A
+                ? LastRoundFixedOuterEdgeResolvePosition(bossOuterEdgeActionId)
+                : LastRoundDefaultOuterEdgeResolvePosition(newTwelveDirection, bossOuterEdgeActionId);
+
+            DrawCircle(
+                accessory,
+                $"{DrawPrefix}_EnvBigCircleRound_{round}_OEResolve_{oeAlias}_Circle",
+                oePosition,
+                EnvMarkerCircleRadius,
+                EnvBigCircleLastRoundResolveGuideDuration,
+                0,
+                SolidSafeGreen,
+                ScaleMode.None);
+            DrawGuide(accessory, $"{DrawPrefix}_EnvBigCircleRound_{round}_OEResolve_Guide_To_{oeAlias}", oePosition, EnvBigCircleLastRoundResolveGuideDuration);
+            GreenMoveToPoint(oePosition, accessory, $"round {round} {oeAlias} after {bossOuterEdgeActionId}");
+            DebugEcho(accessory, $"Boss cast {bossOuterEdgeActionId}: last round outer edge resolve guide {oeAlias} mode={mode}");
+        }
+
         private void SaveActiveOuterEdgeGuide(int round, MarkerAlias finalAlias, Vector3 finalPosition, int duration, bool hasFinalPosition)
         {
             lock (_outerEdgeGuideLock)
@@ -1935,6 +2043,25 @@ namespace RyougiMioScriptNamespace
                 _activeOuterEdgeGuideFinalPosition = finalPosition;
                 _activeOuterEdgeGuideDuration = duration;
                 _activeOuterEdgeGuideHasFinalPosition = hasFinalPosition;
+                _activeOuterEdgeGuideUseLastRoundConfig = false;
+                _activeOuterEdgeGuideLastRoundMode = P2LastRoundOuterEdgeMode.配置A_默认站位;
+                _activeOuterEdgeGuideTwelveDirection = default;
+            }
+        }
+
+        private void SaveActiveLastRoundOuterEdgeGuide(int round, P2LastRoundOuterEdgeMode mode, Vector3 newTwelveDirection, int duration)
+        {
+            lock (_outerEdgeGuideLock)
+            {
+                _activeOuterEdgeGuide = true;
+                _activeOuterEdgeGuideRound = round;
+                _activeOuterEdgeGuideFinalAlias = MarkerAlias.None;
+                _activeOuterEdgeGuideFinalPosition = default;
+                _activeOuterEdgeGuideDuration = duration;
+                _activeOuterEdgeGuideHasFinalPosition = false;
+                _activeOuterEdgeGuideUseLastRoundConfig = true;
+                _activeOuterEdgeGuideLastRoundMode = mode;
+                _activeOuterEdgeGuideTwelveDirection = newTwelveDirection;
             }
         }
 
@@ -1945,6 +2072,9 @@ namespace RyougiMioScriptNamespace
             Vector3 finalPosition;
             int duration;
             bool hasFinalPosition;
+            bool useLastRoundConfig;
+            P2LastRoundOuterEdgeMode lastRoundMode;
+            Vector3 lastRoundTwelveDirection;
 
             lock (_outerEdgeGuideLock)
             {
@@ -1956,15 +2086,37 @@ namespace RyougiMioScriptNamespace
                 finalPosition = _activeOuterEdgeGuideFinalPosition;
                 duration = _activeOuterEdgeGuideDuration > 0 ? _activeOuterEdgeGuideDuration : EnvBigCircleGuideDuration;
                 hasFinalPosition = _activeOuterEdgeGuideHasFinalPosition;
+                useLastRoundConfig = _activeOuterEdgeGuideUseLastRoundConfig;
+                lastRoundMode = _activeOuterEdgeGuideLastRoundMode;
+                lastRoundTwelveDirection = _activeOuterEdgeGuideTwelveDirection;
                 _activeOuterEdgeGuide = false;
                 _activeOuterEdgeGuideRound = 0;
                 _activeOuterEdgeGuideFinalAlias = MarkerAlias.None;
                 _activeOuterEdgeGuideFinalPosition = default;
                 _activeOuterEdgeGuideDuration = 0;
                 _activeOuterEdgeGuideHasFinalPosition = false;
+                _activeOuterEdgeGuideUseLastRoundConfig = false;
+                _activeOuterEdgeGuideLastRoundMode = P2LastRoundOuterEdgeMode.配置A_默认站位;
+                _activeOuterEdgeGuideTwelveDirection = default;
             }
 
             accessory.Method.RemoveDraw($"{DrawPrefix}_EnvBigCircleRound_{round}_OE_.*");
+            if (useLastRoundConfig)
+            {
+                var bossOuterEdgeActionId = GetLastBossOuterEdgeActionId();
+                if (IsBossOuterEdgeAction(bossOuterEdgeActionId))
+                {
+                    DrawLastRoundOuterEdgeResolveGuide(accessory, round, lastRoundMode, lastRoundTwelveDirection, bossOuterEdgeActionId);
+                }
+                else
+                {
+                    GreenMoveStopAndClear(accessory, $"after {actionId}");
+                    DebugEcho(accessory, $"Boss cast {actionId}: last round outer edge resolve skipped, last boss cast={bossOuterEdgeActionId}");
+                }
+
+                return;
+            }
+
             if (hasFinalPosition && finalAlias != MarkerAlias.None)
             {
                 DrawGuide(accessory, $"{DrawPrefix}_EnvBigCircleRound_{round}_Guide_{finalAlias}", finalPosition, duration);
@@ -1982,6 +2134,8 @@ namespace RyougiMioScriptNamespace
         {
             var generation = _generation;
             var resolveGeneration = Volatile.Read(ref _outerEdgeResolveGeneration);
+            var mode = P2LastRoundOuterEdgeSetting;
+            SaveActiveLastRoundOuterEdgeGuide(round, mode, newTwelveDirection, EnvBigCircleGuideDuration);
             Task.Run(async () =>
             {
                 try
@@ -1999,14 +2153,7 @@ namespace RyougiMioScriptNamespace
                             return;
                     }
 
-                    var bossOuterEdgeActionId = GetLastBossOuterEdgeActionId();
-                    if (!IsBossOuterEdgeAction(bossOuterEdgeActionId))
-                    {
-                        DebugEcho(accessory, $"Env big circle round {round}: outer edge delayed guide skipped, last boss cast={bossOuterEdgeActionId}");
-                        return;
-                    }
-
-                    DrawOuterEdgeGuideOnly(accessory, round, bossOuterEdgeActionId, newTwelveDirection, EnvBigCircleGuideDuration);
+                    DrawLastRoundOuterEdgeInitialGuide(accessory, round, newTwelveDirection, mode, EnvBigCircleGuideDuration);
                 }
                 catch (Exception ex)
                 {
@@ -2015,17 +2162,18 @@ namespace RyougiMioScriptNamespace
             });
         }
 
-        private void DrawEnvBigCircleRound(ScriptAccessory accessory, int round, int firstIndex, int secondIndex)
+        private int LastRoundStartDelayMs()
+        {
+            return EnvBigCircleLastRoundStartDelayMs;
+        }
+
+        private EnvBigCircleRoundPlan PrepareEnvBigCircleRoundPlan(ScriptAccessory accessory, int round, int firstIndex, int secondIndex)
         {
             var firstCenter = GetEnvBigCircleCenter(firstIndex);
             var secondCenter = GetEnvBigCircleCenter(secondIndex);
             GetRoundDirections(firstCenter, secondCenter, out var newTwelveDirection, out var newRightDirection);
             StoreEnvBigCircleRoundTwelveDirection(round, newTwelveDirection);
             SortEnvBigCirclesByRoundSide(firstIndex, secondIndex, newRightDirection, out var leftIndex, out var leftCenter, out var rightIndex, out var rightCenter);
-            ClearActiveOuterEdgeGuideState();
-
-            if (round > 1)
-                accessory.Method.RemoveDraw($"{DrawPrefix}_EnvBigCircleRound_{round - 1}_.*");
 
             MarkType?[] roundMarks;
             var markersReady = false;
@@ -2035,21 +2183,43 @@ namespace RyougiMioScriptNamespace
             if (!markersReady || roundMarks == null)
             {
                 DebugEcho(accessory, $"Env big circle round {round}: marker variables not ready.");
-                return;
+                return null;
             }
 
             DebugRoundMarkerAssignments(accessory, round, roundMarks);
+            return new EnvBigCircleRoundPlan
+            {
+                Round = round,
+                FirstIndex = firstIndex,
+                SecondIndex = secondIndex,
+                LeftIndex = leftIndex,
+                RightIndex = rightIndex,
+                LeftCenter = leftCenter,
+                RightCenter = rightCenter,
+                NewTwelveDirection = newTwelveDirection,
+                RoundMarks = roundMarks,
+            };
+        }
+
+        private void ExecuteEnvBigCircleRoundPlan(ScriptAccessory accessory, EnvBigCircleRoundPlan plan)
+        {
+            var round = plan.Round;
+            ClearActiveOuterEdgeGuideState();
+
+            if (round > 1)
+                accessory.Method.RemoveDraw($"{DrawPrefix}_EnvBigCircleRound_{round - 1}_.*");
 
             var myIndex = GetMyIndex(accessory);
+            var roundMarks = plan.RoundMarks;
             if (myIndex >= 0 && myIndex < roundMarks.Length && roundMarks[myIndex].HasValue)
             {
                 var alias = MarkerAliasForRoundMark(roundMarks[myIndex].Value, round % 2 == 1);
                 var bossOuterEdgeActionId = GetLastBossOuterEdgeActionId();
                 var useOuterEdgeRelay = round > 1 && round % 2 == 1 && IsBossOuterEdgeAction(bossOuterEdgeActionId);
-                if (DrawEnvMarkerAlias(accessory, round, alias, leftIndex, leftCenter, rightIndex, rightCenter, newTwelveDirection, !useOuterEdgeRelay, out var finalPosition))
+                if (DrawEnvMarkerAlias(accessory, round, alias, plan.LeftIndex, plan.LeftCenter, plan.RightIndex, plan.RightCenter, plan.NewTwelveDirection, !useOuterEdgeRelay, out var finalPosition))
                 {
                     if (useOuterEdgeRelay)
-                        DrawOuterEdgeRelayGuide(accessory, round, bossOuterEdgeActionId, newTwelveDirection, finalPosition, alias, EnvBigCircleGuideDurationForRound(round));
+                        DrawOuterEdgeRelayGuide(accessory, round, bossOuterEdgeActionId, plan.NewTwelveDirection, finalPosition, alias, EnvBigCircleGuideDurationForRound(round));
                     else
                         GreenMoveToPoint(finalPosition, accessory, $"round {round} {alias}");
 
@@ -2061,11 +2231,51 @@ namespace RyougiMioScriptNamespace
                 DebugEcho(accessory, $"Env big circle round {round}: no marker for my index={myIndex}");
             }
 
-            DebugEcho(accessory, $"Env big circle round {round}: indexes={firstIndex},{secondIndex} left={leftIndex} right={rightIndex}");
+            DebugEcho(accessory, $"Env big circle round {round}: indexes={plan.FirstIndex},{plan.SecondIndex} left={plan.LeftIndex} right={plan.RightIndex}");
             CommandMarkRoundMarkersForDuration(accessory, round, roundMarks);
 
             if (round == EnvBigCircleLastRound)
-                ScheduleLastRoundOuterEdgeGuide(accessory, round, newTwelveDirection);
+                ScheduleLastRoundOuterEdgeGuide(accessory, round, plan.NewTwelveDirection);
+        }
+
+        private void ScheduleDelayedEnvBigCircleRoundPlan(ScriptAccessory accessory, EnvBigCircleRoundPlan plan, int delayMs)
+        {
+            var generation = _generation;
+            DebugEcho(accessory, $"Env big circle round {plan.Round}: delayed start {delayMs}ms");
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(delayMs);
+                    if (generation != _generation)
+                        return;
+
+                    lock (_envBigCircleLock)
+                    {
+                        if (_envBigCircleRound != plan.Round)
+                            return;
+                    }
+
+                    ExecuteEnvBigCircleRoundPlan(accessory, plan);
+                }
+                catch (Exception ex)
+                {
+                    DebugEcho(accessory, $"Env big circle round {plan.Round}: delayed start failed: {ex.Message}");
+                }
+            });
+        }
+
+        private void DrawEnvBigCircleRound(ScriptAccessory accessory, int round, int firstIndex, int secondIndex)
+        {
+            var plan = PrepareEnvBigCircleRoundPlan(accessory, round, firstIndex, secondIndex);
+            if (plan == null)
+                return;
+
+            var delayMs = round == EnvBigCircleLastRound ? LastRoundStartDelayMs() : 0;
+            if (delayMs > 0)
+                ScheduleDelayedEnvBigCircleRoundPlan(accessory, plan, delayMs);
+            else
+                ExecuteEnvBigCircleRoundPlan(accessory, plan);
         }
 
         private async Task<bool> WaitUntilAsync(Func<bool> condition, int timeoutMs, int intervalMs = 25)
