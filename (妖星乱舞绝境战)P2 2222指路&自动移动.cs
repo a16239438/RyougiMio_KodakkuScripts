@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.4", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.6", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -1874,7 +1874,7 @@ namespace RyougiMioScriptNamespace
                 case MarkerAlias.OR4:
                     return DrawEnvMarkerAliasPoint(accessory, round, alias, "RedOuter", "0320", rightCenter, newTwelveDirection, 3.0f + 1.0f / 3.0f, EnvOuterMarkerOffset, SolidDangerRed, drawGuide, out position);
                 case MarkerAlias.EL1:
-                    return DrawEnvMarkerAliasPoint(accessory, round, alias, "GreenInner", "0830", leftCenter, newTwelveDirection, 8.5f, EnvInnerMarkerOffset, SolidSafeGreen, drawGuide, out position);
+                    return DrawEnvMarkerAliasPoint(accessory, round, alias, "GreenInner", "0835", leftCenter, newTwelveDirection, 8.0f + 7.0f / 12.0f, 3.625f, SolidSafeGreen, drawGuide, out position);
                 case MarkerAlias.EL2:
                     return DrawEnvMarkerAliasPoint(accessory, round, alias, "GreenInner", "0730", leftCenter, newTwelveDirection, 7.5f, EnvInnerMarkerOffset, SolidSafeGreen, drawGuide, out position);
                 case MarkerAlias.EL3:
