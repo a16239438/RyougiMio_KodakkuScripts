@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.8", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.9", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -192,7 +192,7 @@ namespace RyougiMioScriptNamespace
             new[] { 4, 6 },
             new[] { 5, 7 },
         };
-        private static readonly int[] EvenGroup2FanLeftSteelRightPriorityPartyIndexes = new[] { 0, 1, 4, 5, 2, 3, 6, 7 };
+        private static readonly int[] FanLeftSteelRightGroup2PriorityPartyIndexes = new[] { 0, 1, 4, 5, 2, 3, 6, 7 };
         private static readonly MarkType[] MarkerVariableMarkTypes = new[]
         {
             MarkType.Attack1,
@@ -1247,10 +1247,10 @@ namespace RyougiMioScriptNamespace
             AssignMarkerVariablesByPriority(_activeTargetIconGroup2.Where(IsDpsPartyIndex), reversePriority, MarkType.Bind1, MarkType.Bind2);
         }
 
-        private List<int> EvenGroup2FanLeftSteelRightMembersByIcon(uint iconId, bool useInitialGroup2Icon)
+        private List<int> FanLeftSteelRightGroup2MembersByIcon(uint iconId, bool useInitialGroup2Icon)
         {
             var ordered = new List<int>();
-            foreach (var index in EvenGroup2FanLeftSteelRightPriorityPartyIndexes)
+            foreach (var index in FanLeftSteelRightGroup2PriorityPartyIndexes)
             {
                 if (!_activeTargetIconGroup2.Contains(index)) continue;
 
@@ -1336,8 +1336,6 @@ namespace RyougiMioScriptNamespace
             if (cd < 0) return false;
 
             var cc = FirstPartyIndexByIcon(_activeTargetIconGroup1, TargetIcon02CC);
-            var group2Cd = PartyIndexesByIcon(_activeTargetIconGroup2, TargetIcon02CD);
-            var group2Cc = PartyIndexesByIcon(_activeTargetIconGroup2, TargetIcon02CC);
 
             if (round == 1)
             {
@@ -1420,8 +1418,14 @@ namespace RyougiMioScriptNamespace
             }
             else
             {
-                AssignMarkerVariables(group2Cd, MarkType.Stop1, MarkType.Stop2);
-                AssignMarkerVariables(group2Cc, MarkType.Bind1, MarkType.Bind2);
+                var stopOrder = FanLeftSteelRightGroup2MembersByIcon(TargetIcon02CD, false);
+                var bindOrder = FanLeftSteelRightGroup2MembersByIcon(TargetIcon02CC, false);
+
+                DebugEcho(accessory, $"Env big circle round {round}: odd fan-left G2 priority Stop={string.Join(", ", stopOrder.Select(PartyPriorityLabel))} Bind={string.Join(", ", bindOrder.Select(PartyPriorityLabel))}");
+                AssignMarkerVariable(MarkType.Stop1, stopOrder.Count > 0 ? stopOrder[0] : -1);
+                AssignMarkerVariable(MarkType.Stop2, stopOrder.Count > 1 ? stopOrder[1] : -1);
+                AssignMarkerVariable(MarkType.Bind1, bindOrder.Count > 0 ? bindOrder[0] : -1);
+                AssignMarkerVariable(MarkType.Bind2, bindOrder.Count > 1 ? bindOrder[1] : -1);
             }
 
             return true;
@@ -1454,8 +1458,8 @@ namespace RyougiMioScriptNamespace
             AssignMarkerVariable(MarkType.Attack4, group1CcByNine.Count > 1 ? group1CcByNine[1] : -1);
 
             var useInitialGroup2Icon = round == EnvBigCircleLastRound;
-            var stopOrder = EvenGroup2FanLeftSteelRightMembersByIcon(TargetIcon02CD, useInitialGroup2Icon);
-            var bindOrder = EvenGroup2FanLeftSteelRightMembersByIcon(TargetIcon02CC, useInitialGroup2Icon);
+            var stopOrder = FanLeftSteelRightGroup2MembersByIcon(TargetIcon02CD, useInitialGroup2Icon);
+            var bindOrder = FanLeftSteelRightGroup2MembersByIcon(TargetIcon02CC, useInitialGroup2Icon);
 
             DebugEcho(accessory, $"Env big circle round {round}: even fan-left G2 priority Stop={string.Join(", ", stopOrder.Select(PartyPriorityLabel))} Bind={string.Join(", ", bindOrder.Select(PartyPriorityLabel))} iconSource={(useInitialGroup2Icon ? "initialG2" : "current")}");
             AssignMarkerVariable(MarkType.Stop1, stopOrder.Count > 0 ? stopOrder[0] : -1);
