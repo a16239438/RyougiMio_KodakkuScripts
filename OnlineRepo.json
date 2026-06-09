@@ -61,6 +61,15 @@
     "TerritoryIds": [1363],
     "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/(妖星乱舞绝境战)P2%202222指路%26自动移动.cs",
     "UpdateInfo": "可以配置近战/远程闲人的偶数轮次站位规则"
+  }, 
+  {
+    "Name": "(妖星乱舞绝境战)P4 指路&自动移动",
+    "Guid": "79ae48d3-c462-4e4a-8108-9eb507e131b2",
+    "Version": "0.0.0.1",
+    "Author": "RyougiMio",
+    "TerritoryIds": [1363],
+    "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/(妖星乱舞绝境战)P4%20指路%26自动移动.cs",
+    "UpdateInfo": "测试版"
   }
 
 
