@@ -17,7 +17,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.1", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击1234左 锁链123圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.2", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击1234左 锁链123圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class Script1363P4
     {
         #region Settings
@@ -873,6 +873,27 @@ namespace RyougiMioScriptNamespace
                 if (expiresAt[partyIndex, statusIndexA] <= 0)
                     expiresAt[partyIndex, statusIndexA] = oldExpiresAt;
             }
+        }
+
+        private static void ClearP4StatusIndex(int[,] states, long[,] expiresAt, int partyIndex, int statusIndex)
+        {
+            if (partyIndex < 0 || partyIndex >= 8 || statusIndex < 0 || statusIndex >= P4TrackedStatusIds.Length)
+                return;
+
+            states[partyIndex, statusIndex] = P4StateUnknown;
+            expiresAt[partyIndex, statusIndex] = 0;
+        }
+
+        private static void ClearP4StatusGroupOnRemove(int[,] states, long[,] expiresAt, int partyIndex, uint statusId, int statusIndex)
+        {
+            if (statusId == 5544 || statusId == 5545)
+            {
+                ClearP4StatusIndex(states, expiresAt, partyIndex, 3);
+                ClearP4StatusIndex(states, expiresAt, partyIndex, 4);
+                return;
+            }
+
+            ClearP4StatusIndex(states, expiresAt, partyIndex, statusIndex);
         }
 
         private static P4ClockDirection ResolveP4MoveClock(int[,] states, long[,] expiresAt, int partyIndex, long now)
@@ -2065,10 +2086,7 @@ namespace RyougiMioScriptNamespace
                 return;
 
             lock (_p4Lock)
-            {
-                _p4StatusStateByPartyAndStatus[partyIndex, statusIndex] = P4StateUnknown;
-                _p4StatusExpiresAtByPartyAndStatus[partyIndex, statusIndex] = 0;
-            }
+                ClearP4StatusGroupOnRemove(_p4StatusStateByPartyAndStatus, _p4StatusExpiresAtByPartyAndStatus, partyIndex, statusId, statusIndex);
 
             var generation = _generation;
 
