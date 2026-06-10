@@ -17,7 +17,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.3", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击1234左 锁链123圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.4", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击1234左 锁链123圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class Script1363P4
     {
         #region Settings
@@ -2189,7 +2189,7 @@ namespace RyougiMioScriptNamespace
             var l1 = P4ArenaCenter - rightVector * P4GuideOffset;
             var r1 = P4ArenaCenter + rightVector * P4GuideOffset;
             var sourceSide = SideOfPosition(@event.SourcePosition, rightVector);
-            var sourceSideColor = fourthParam == 1122 ? P4HalfColor.Purple : P4HalfColor.Blue;
+            var sourceSideColor = P4HalfColor.Blue;
             var otherSideColor = OppositeColor(sourceSideColor);
             var leftColor = sourceSide == P4HalfSide.Left ? sourceSideColor : otherSideColor;
             var rightColor = sourceSide == P4HalfSide.Right ? sourceSideColor : otherSideColor;
