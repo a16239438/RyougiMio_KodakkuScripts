@@ -17,7 +17,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.2", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击1234左 锁链123圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.3", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击1234左 锁链123圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class Script1363P4
     {
         #region Settings
@@ -140,8 +140,8 @@ namespace RyougiMioScriptNamespace
         private static readonly Vector4 SolidDangerRed = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
         private static readonly string[] PartyPriorityLabels = new[] { "MT", "ST", "H1", "H2", "D1", "D2", "D3", "D4" };
         private static readonly uint[] P4TrackedStatusIds = new uint[] { 5541, 5542, 5543, 5544, 5545, 5546, 5547, 5548, 454, 1382 };
-        private static readonly MarkType[] P4LeftMarks = new[] { MarkType.Attack1, MarkType.Attack2, MarkType.Attack3, MarkType.Attack4 };
-        private static readonly MarkType[] P4RightMarks = new[] { MarkType.Bind1, MarkType.Bind2, MarkType.Bind3, MarkType.Circle };
+        private static readonly MarkType[] P4LeftMarks = new[] { MarkType.Attack1, MarkType.Attack2, MarkType.Attack3, MarkType.Attack4, MarkType.Attack5, MarkType.Attack6, MarkType.Attack7, MarkType.Attack8 };
+        private static readonly MarkType[] P4RightMarks = new[] { MarkType.Bind1, MarkType.Bind2, MarkType.Bind3, MarkType.Circle, MarkType.Stop1, MarkType.Stop2, MarkType.Cross, MarkType.Square };
         private static readonly MarkType[] P4PetrifyTrueMarks = new[] { MarkType.Stop1, MarkType.Stop2 };
         private static readonly MarkType[] P4PetrifyFalseMarks = new[] { MarkType.Bind1, MarkType.Bind2 };
 
@@ -603,6 +603,25 @@ namespace RyougiMioScriptNamespace
             return false;
         }
 
+        private static bool TryGetP4DirectTrueStatus(uint statusId, out uint trueStatusId)
+        {
+            switch (statusId)
+            {
+                case 4887:
+                    trueStatusId = 5542;
+                    return true;
+                case 4888:
+                    trueStatusId = 5541;
+                    return true;
+                case 5464:
+                    trueStatusId = 454;
+                    return true;
+                default:
+                    trueStatusId = 0;
+                    return false;
+            }
+        }
+
         private bool TryGetActiveP4StateValueLocked(long now, out int value)
         {
             value = P4StateUnknown;
@@ -838,18 +857,6 @@ namespace RyougiMioScriptNamespace
                 ? states[partyIndex, statusIndexB]
                 : P4StateUnknown;
 
-            if (stateA == P4StateUnknown)
-            {
-                states[partyIndex, statusIndexA] = P4StateUnknown;
-                expiresAt[partyIndex, statusIndexA] = 0;
-            }
-
-            if (stateB == P4StateUnknown)
-            {
-                states[partyIndex, statusIndexB] = P4StateUnknown;
-                expiresAt[partyIndex, statusIndexB] = 0;
-            }
-
             if (stateA == P4StateTrue || stateB == P4StateTrue)
                 return;
 
@@ -873,27 +880,6 @@ namespace RyougiMioScriptNamespace
                 if (expiresAt[partyIndex, statusIndexA] <= 0)
                     expiresAt[partyIndex, statusIndexA] = oldExpiresAt;
             }
-        }
-
-        private static void ClearP4StatusIndex(int[,] states, long[,] expiresAt, int partyIndex, int statusIndex)
-        {
-            if (partyIndex < 0 || partyIndex >= 8 || statusIndex < 0 || statusIndex >= P4TrackedStatusIds.Length)
-                return;
-
-            states[partyIndex, statusIndex] = P4StateUnknown;
-            expiresAt[partyIndex, statusIndex] = 0;
-        }
-
-        private static void ClearP4StatusGroupOnRemove(int[,] states, long[,] expiresAt, int partyIndex, uint statusId, int statusIndex)
-        {
-            if (statusId == 5544 || statusId == 5545)
-            {
-                ClearP4StatusIndex(states, expiresAt, partyIndex, 3);
-                ClearP4StatusIndex(states, expiresAt, partyIndex, 4);
-                return;
-            }
-
-            ClearP4StatusIndex(states, expiresAt, partyIndex, statusIndex);
         }
 
         private static P4ClockDirection ResolveP4MoveClock(int[,] states, long[,] expiresAt, int partyIndex, long now)
@@ -1971,12 +1957,9 @@ namespace RyougiMioScriptNamespace
             if (!int.TryParse(@event["Param"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var param))
                 return;
 
-            if (!TryGetTargetDataId(@event, accessory, out var targetDataId))
-                return;
-
             var now = NowMs();
 
-            if (targetDataId == P4XDataId && (param == 1121 || param == 1122))
+            if (param == 1121 || param == 1122)
             {
                 var targetPosition = ResolveEventTargetPosition(@event, accessory);
                 var newTwelveDirection = DefaultNorth;
@@ -1999,7 +1982,7 @@ namespace RyougiMioScriptNamespace
                     }
                 }
             }
-            else if (targetDataId == P4CDataId && (param == 1119 || param == 1120))
+            else if (param == 1119 || param == 1120)
             {
                 lock (_p4Lock)
                 {
@@ -2010,14 +1993,17 @@ namespace RyougiMioScriptNamespace
             }
         }
 
-        [ScriptMethod(name: "P4 状态变量赋值", eventType: EventTypeEnum.StatusAdd, eventCondition: ["StatusID:regex:^(554[1-8]|454|1382)$"], userControl: false)]
+        [ScriptMethod(name: "P4 状态变量赋值", eventType: EventTypeEnum.StatusAdd, eventCondition: ["StatusID:regex:^(554[1-8]|454|1382|4887|4888|5464)$"], userControl: false)]
         public void P4_TrackedStatusAdd(Event @event, ScriptAccessory accessory)
         {
             _acc = accessory;
             if (_phase != Phase.P4) return;
 
-            if (!TryGetStatusId(@event, out var statusId))
+            if (!TryGetStatusId(@event, out var rawStatusId))
                 return;
+
+            var directTrue = TryGetP4DirectTrueStatus(rawStatusId, out var directTrueStatusId);
+            var statusId = directTrue ? directTrueStatusId : rawStatusId;
 
             if (!TryGetP4TrackedStatusIndex(statusId, out var statusIndex))
                 return;
@@ -2031,14 +2017,47 @@ namespace RyougiMioScriptNamespace
 
             var now = NowMs();
             var hasDuration = TryGetDurationMs(@event, out var durationMs);
+            var assigned = false;
+            var assignedState = P4StateUnknown;
+            var xParam = 0;
+            var cParam = 0;
+            var xRemainingMs = 0;
+            var cRemainingMs = 0;
+            var xActive = false;
+            var cActive = false;
+            TryGetSourceId(@event, out var sourceId);
 
             lock (_p4Lock)
             {
                 if (hasDuration)
                     _p4StatusExpiresAtByPartyAndStatus[partyIndex, statusIndex] = now + durationMs;
 
-                if (TryGetActiveP4StateValueLocked(now, out var stateValue))
+                if (directTrue)
+                {
+                    _p4StatusStateByPartyAndStatus[partyIndex, statusIndex] = P4StateTrue;
+                    assigned = true;
+                    assignedState = P4StateTrue;
+                }
+                else if (TryGetActiveP4StateValueLocked(now, out var stateValue))
+                {
                     _p4StatusStateByPartyAndStatus[partyIndex, statusIndex] = stateValue;
+                    assigned = true;
+                    assignedState = stateValue;
+                }
+
+                xParam = _p4XParam;
+                cParam = _p4CParam;
+                xRemainingMs = RemainingMs(_p4XExpiresAt, now);
+                cRemainingMs = RemainingMs(_p4CExpiresAt, now);
+                xActive = _p4XParam != 0 && xRemainingMs > 0;
+                cActive = _p4CParam != 0 && cRemainingMs > 0;
+            }
+
+            if (statusId == 5541 || statusId == 5542 || statusId == 454 || statusId == 1382)
+            {
+                DebugEcho(
+                    accessory,
+                    $"P4关键状态捕获 raw={rawStatusId} as={statusId} direct={directTrue} target={PartyPriorityLabel(partyIndex)} {FormatObjectId(targetId)} source={FormatObjectId(sourceId)} duration={(hasDuration ? durationMs.ToString(CultureInfo.InvariantCulture) : "-")}ms assigned={(assigned ? assignedState.ToString(CultureInfo.InvariantCulture) : "-")} x={xParam}/{FormatRemainingMs(xRemainingMs)}/{xActive} c={cParam}/{FormatRemainingMs(cRemainingMs)}/{cActive}");
             }
         }
 
@@ -2066,7 +2085,7 @@ namespace RyougiMioScriptNamespace
                 () => ExecuteP4ChainMove(accessory, generation, round));
         }
 
-        [ScriptMethod(name: "P4 后续状态移除推进", eventType: EventTypeEnum.StatusRemove, eventCondition: ["StatusID:regex:^(554[1-8]|454|1382)$"], userControl: false)]
+        [ScriptMethod(name: "P4 后续状态移除推进", eventType: EventTypeEnum.StatusRemove, eventCondition: ["StatusID:regex:^554[3-8]$"], userControl: false)]
         public void P4_TrackedStatusRemove(Event @event, ScriptAccessory accessory)
         {
             _acc = accessory;
@@ -2075,7 +2094,7 @@ namespace RyougiMioScriptNamespace
             if (!TryGetStatusId(@event, out var statusId))
                 return;
 
-            if (!TryGetP4TrackedStatusIndex(statusId, out var statusIndex))
+            if (!TryGetP4TrackedStatusIndex(statusId, out _))
                 return;
 
             if (!TryGetTargetId(@event, out var targetId))
@@ -2084,9 +2103,6 @@ namespace RyougiMioScriptNamespace
             var partyIndex = GetPlayerIndex(accessory, targetId);
             if (partyIndex < 0 || partyIndex >= 8)
                 return;
-
-            lock (_p4Lock)
-                ClearP4StatusGroupOnRemove(_p4StatusStateByPartyAndStatus, _p4StatusExpiresAtByPartyAndStatus, partyIndex, statusId, statusIndex);
 
             var generation = _generation;
 
