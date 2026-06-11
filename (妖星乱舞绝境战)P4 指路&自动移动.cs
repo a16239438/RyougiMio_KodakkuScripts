@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
@@ -17,7 +18,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.4", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击1234左 锁链123圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.5", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击1234左 锁链123圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class Script1363P4
     {
         #region Settings
@@ -116,6 +117,60 @@ namespace RyougiMioScriptNamespace
             WaterMoon,
         }
 
+        private enum P4BuffGroupKind
+        {
+            Unknown,
+            A,
+            B,
+            C,
+            D,
+            E,
+            F,
+        }
+
+        private enum P4DangerShape
+        {
+            Rect,
+            Fan,
+        }
+
+        private enum P4BuffCategory
+        {
+            Mixed,
+            ThunderShare,
+            Petrify,
+            Element,
+        }
+
+        private sealed class P4BuffRecord
+        {
+            public int PartyIndex;
+            public uint StatusId;
+            public int State;
+            public int DurationMs;
+            public long ExpiresAt;
+            public int SnapshotRemainingMs;
+        }
+
+        private sealed class P4BuffGroup
+        {
+            public P4BuffGroupKind Kind;
+            public P4BuffCategory Category;
+            public int DurationMs;
+            public int SnapshotRemainingMs;
+            public long ExpiresAt;
+            public readonly List<P4BuffRecord> Records = new List<P4BuffRecord>();
+        }
+
+        private sealed class P4DangerRecord
+        {
+            public uint ActionId;
+            public P4DangerShape Shape;
+            public Vector3 Position;
+            public float Rotation;
+            public long CapturedAt;
+        }
+
         private const uint InvalidObjectId = 0xE0000000;
         private const uint P4StartActionId = 49884;
         private const uint P4ResolveActionId = 50069;
@@ -132,8 +187,17 @@ namespace RyougiMioScriptNamespace
         private const int P4StateFalse = 2;
         private const float P4GuideOffset = 4.0f;
         private const float P4ChainGuideOffset = 8.0f;
+        private const int P4BuffGroupToleranceMs = 1200;
+        private const int P4MaxScheduledGroupCount = 6;
+        private const float P4RectDangerWidth = 10.0f;
+        private const float P4RectDangerLength = 40.0f;
+        private const float P4FanDangerRadius = 40.0f;
+        private const float P4FanDangerRadian = MathF.PI / 2.0f;
+        private const int P4BRectLookbackMs = 7000;
+        private const int P4DFanLookbackMs = 10000;
         private const string DrawPrefix = "KDYD_P4";
         private const string GreenMovePrefix = "PromeRotation.GreenMove.";
+        private const string DebugLogPath = @"e:\game\Workplace\Kodd\KDYD_P4_debug.log";
 
         private static readonly Vector3 P4ArenaCenter = new Vector3(100.0f, 0.0f, 100.0f);
         private static readonly Vector3 DefaultNorth = new Vector3(0.0f, 0.0f, -1.0f);
@@ -144,6 +208,8 @@ namespace RyougiMioScriptNamespace
         private static readonly MarkType[] P4RightMarks = new[] { MarkType.Bind1, MarkType.Bind2, MarkType.Bind3, MarkType.Circle, MarkType.Stop1, MarkType.Stop2, MarkType.Cross, MarkType.Square };
         private static readonly MarkType[] P4PetrifyTrueMarks = new[] { MarkType.Stop1, MarkType.Stop2 };
         private static readonly MarkType[] P4PetrifyFalseMarks = new[] { MarkType.Bind1, MarkType.Bind2 };
+        private static readonly float[] P4CardinalClocks = new[] { 0.0f, 3.0f, 6.0f, 9.0f };
+        private static readonly float[] P4FinalHalfClocks = new[] { 11.5f, 12.5f, 2.5f, 3.5f, 5.5f, 6.5f, 8.5f, 9.5f };
 
         private ScriptAccessory _acc;
         private Phase _phase = Phase.Init;
@@ -155,10 +221,20 @@ namespace RyougiMioScriptNamespace
         private readonly P4HalfSide[] _p4ResolvedSideByPartyIndex = new P4HalfSide[8];
         private readonly P4HalfColor[] _p4ResolvedColorByPartyIndex = new P4HalfColor[8];
         private readonly MarkType?[] _p4CommandMarkByPartyIndex = new MarkType?[8];
+        private readonly List<P4BuffRecord> _p4BuffRecords = new List<P4BuffRecord>();
+        private readonly List<P4BuffGroup> _p4BuffGroups = new List<P4BuffGroup>();
+        private readonly List<P4DangerRecord> _p4DangerRecords = new List<P4DangerRecord>();
+        private readonly object _p4DebugFileLock = new object();
         private Timer _p4CommandMarkClearTimer;
         private P4ChainStep _p4ChainStep = P4ChainStep.None;
         private int _p4ChainRound;
         private int _p4ChainStepGeneration;
+        private bool _p4BuffGroupsScheduled;
+        private bool _p4BuffGroupsScheduleQueued;
+        private bool _p4FGroupDangerDrawn;
+        private long _p4FGroupStartedAt;
+        private P4ElementCall _p4CElementCall = P4ElementCall.Unknown;
+        private P4ElementCall _p4FElementCall = P4ElementCall.Unknown;
         private int _p4XParam;
         private long _p4XExpiresAt;
         private long _p4XUpdatedAt;
@@ -167,6 +243,7 @@ namespace RyougiMioScriptNamespace
         private long _p4CUpdatedAt;
         private int _p4XEventCount;
         private int _p4FourthXParam;
+        private long _p4FourthSnapshotAt;
         private Vector3 _p4FourthTargetPosition;
         private Vector3 _p4FourthNewTwelveDirection;
         private bool _p4FourthDirectionReady;
@@ -226,10 +303,19 @@ namespace RyougiMioScriptNamespace
                 Array.Clear(_p4ResolvedSideByPartyIndex, 0, _p4ResolvedSideByPartyIndex.Length);
                 Array.Clear(_p4ResolvedColorByPartyIndex, 0, _p4ResolvedColorByPartyIndex.Length);
                 Array.Clear(_p4CommandMarkByPartyIndex, 0, _p4CommandMarkByPartyIndex.Length);
+                _p4BuffRecords.Clear();
+                _p4BuffGroups.Clear();
+                _p4DangerRecords.Clear();
 
                 _p4ChainStep = P4ChainStep.None;
                 _p4ChainRound = 0;
                 _p4ChainStepGeneration++;
+                _p4BuffGroupsScheduled = false;
+                _p4BuffGroupsScheduleQueued = false;
+                _p4FGroupDangerDrawn = false;
+                _p4FGroupStartedAt = 0;
+                _p4CElementCall = P4ElementCall.Unknown;
+                _p4FElementCall = P4ElementCall.Unknown;
                 _p4XParam = 0;
                 _p4XExpiresAt = 0;
                 _p4XUpdatedAt = 0;
@@ -238,6 +324,7 @@ namespace RyougiMioScriptNamespace
                 _p4CUpdatedAt = 0;
                 _p4XEventCount = 0;
                 _p4FourthXParam = 0;
+                _p4FourthSnapshotAt = 0;
                 _p4FourthTargetPosition = default;
                 _p4FourthNewTwelveDirection = DefaultNorth;
                 _p4FourthDirectionReady = false;
@@ -271,6 +358,18 @@ namespace RyougiMioScriptNamespace
             if (!DeveloperMode) return;
             accessory.Log.Debug($"[KDYD_P4] {message}");
             accessory.Method.SendChat($"/e [KDYD_P4] {message}");
+            try
+            {
+                lock (_p4DebugFileLock)
+                {
+                    File.AppendAllText(
+                        DebugLogPath,
+                        $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [KDYD_P4] {message}{Environment.NewLine}");
+                }
+            }
+            catch
+            {
+            }
         }
 
         private void CommandMarkClear(ScriptAccessory accessory)
@@ -603,6 +702,8 @@ namespace RyougiMioScriptNamespace
             return false;
         }
 
+        #region P4 Hotpot Helpers
+
         private static bool TryGetP4DirectTrueStatus(uint statusId, out uint trueStatusId)
         {
             switch (statusId)
@@ -624,16 +725,33 @@ namespace RyougiMioScriptNamespace
 
         private bool TryGetActiveP4StateValueLocked(long now, out int value)
         {
+            return TryGetActiveP4StateValueLocked(now, out value, out _, out _, out _);
+        }
+
+        private bool TryGetActiveP4StateValueLocked(long now, out int value, out string windowName, out int param, out int remainingMs)
+        {
             value = P4StateUnknown;
+            windowName = "-";
+            param = 0;
+            remainingMs = 0;
 
             var hasX = _p4XParam != 0 && now <= _p4XExpiresAt;
             var hasC = _p4CParam != 0 && now <= _p4CExpiresAt;
             if (!hasX && !hasC)
                 return false;
 
-            var param = hasX && (!hasC || _p4XUpdatedAt >= _p4CUpdatedAt)
-                ? _p4XParam
-                : _p4CParam;
+            if (hasX && (!hasC || _p4XUpdatedAt >= _p4CUpdatedAt))
+            {
+                windowName = "X";
+                param = _p4XParam;
+                remainingMs = RemainingMs(_p4XExpiresAt, now);
+            }
+            else
+            {
+                windowName = "C";
+                param = _p4CParam;
+                remainingMs = RemainingMs(_p4CExpiresAt, now);
+            }
 
             return TryGetP4StateValueFromParam(param, out value);
         }
@@ -745,6 +863,8 @@ namespace RyougiMioScriptNamespace
             return P4HalfSide.Unknown;
         }
 
+        #endregion
+
         private static string FormatP4Side(P4HalfSide side)
         {
             switch (side)
@@ -797,6 +917,123 @@ namespace RyougiMioScriptNamespace
                 " ",
                 P4TrackedStatusIds.Select((statusId, statusIndex) =>
                     $"{statusId}={states[partyIndex, statusIndex]}({FormatRemainingMs(RemainingMs(expiresAt[partyIndex, statusIndex], now))})"));
+        }
+
+        private static bool IsP4ChainDebugStatus(uint statusId)
+        {
+            return statusId >= 5543 && statusId <= 5548;
+        }
+
+        private static bool IsP4LaterXStatus(uint statusId)
+        {
+            return statusId == 5543 || statusId == 5544 || statusId == 5545 || statusId == 5546;
+        }
+
+        private static bool IsP4LaterCStatus(uint statusId)
+        {
+            return statusId == 5547 || statusId == 5548;
+        }
+
+        private static bool TryGetP4BuffCategory(uint statusId, out P4BuffCategory category)
+        {
+            switch (statusId)
+            {
+                case 5544:
+                case 5545:
+                case 5546:
+                    category = P4BuffCategory.ThunderShare;
+                    return true;
+                case 5543:
+                    category = P4BuffCategory.Petrify;
+                    return true;
+                case 5547:
+                case 5548:
+                    category = P4BuffCategory.Element;
+                    return true;
+                default:
+                    category = default;
+                    return false;
+            }
+        }
+
+        private static string P4BuffName(uint statusId)
+        {
+            switch (statusId)
+            {
+                case 5547: return "Fire";
+                case 5548: return "Water";
+                case 5545: return "WaterShare";
+                case 5544: return "Thunder";
+                case 5543: return "Petrify";
+                case 5546: return "Accel";
+                default: return statusId.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        private static bool TryResolveP4LaterStateFromWindow(uint statusId, int xParam, long xExpiresAt, int cParam, long cExpiresAt, long now, out int state, out string windowName, out int usedParam, out int remainingMs)
+        {
+            state = P4StateUnknown;
+            windowName = "-";
+            usedParam = 0;
+            remainingMs = 0;
+
+            if (IsP4LaterXStatus(statusId))
+            {
+                if (xParam == 0 || now > xExpiresAt)
+                    return false;
+
+                windowName = "X";
+                usedParam = xParam;
+                remainingMs = RemainingMs(xExpiresAt, now);
+                return TryGetP4StateValueFromParam(xParam, out state);
+            }
+
+            if (IsP4LaterCStatus(statusId))
+            {
+                if (cParam == 0 || now > cExpiresAt)
+                    return false;
+
+                windowName = "C";
+                usedParam = cParam;
+                remainingMs = RemainingMs(cExpiresAt, now);
+                return TryGetP4StateValueFromParam(cParam, out state);
+            }
+
+            return false;
+        }
+
+        private static string FormatP4StatusStateWithRemaining(int[,] states, long[,] expiresAt, int partyIndex, uint statusId, long now)
+        {
+            if (partyIndex < 0
+                || partyIndex >= 8
+                || !TryGetP4TrackedStatusIndex(statusId, out var statusIndex))
+                return $"{statusId}=0(-)";
+
+            return $"{statusId}={states[partyIndex, statusIndex]}({FormatRemainingMs(RemainingMs(expiresAt[partyIndex, statusIndex], now))})";
+        }
+
+        private static string FormatP4StatusesWithRemaining(int[,] states, long[,] expiresAt, int partyIndex, long now, params uint[] statusIds)
+        {
+            return string.Join(" ", statusIds.Select(statusId => FormatP4StatusStateWithRemaining(states, expiresAt, partyIndex, statusId, now)));
+        }
+
+        private static string FormatP4WindowDebug(string name, int param, int remainingMs, bool active)
+        {
+            if (param == 0)
+                return $"{name}-";
+
+            return $"{name}{param}({(active ? FormatRemainingMs(remainingMs) : "-")})";
+        }
+
+        private static string FormatP4UsedWindowDebug(string name, int param, int remainingMs)
+        {
+            if (string.IsNullOrWhiteSpace(name) || name == "-")
+                return "-";
+
+            if (name == "direct")
+                return "direct";
+
+            return $"{name}{param}({FormatRemainingMs(remainingMs)})";
         }
 
         private static bool IsTnPartyIndex(int partyIndex)
@@ -921,6 +1158,56 @@ namespace RyougiMioScriptNamespace
                 case P4ClockDirection.Six: return "6";
                 case P4ClockDirection.Nine: return "9";
                 default: return "-";
+            }
+        }
+
+        private static string FormatP4BuffGroupKind(P4BuffGroupKind kind)
+        {
+            switch (kind)
+            {
+                case P4BuffGroupKind.A: return "A";
+                case P4BuffGroupKind.B: return "B";
+                case P4BuffGroupKind.C: return "C";
+                case P4BuffGroupKind.D: return "D";
+                case P4BuffGroupKind.E: return "E";
+                case P4BuffGroupKind.F: return "F";
+                default: return "-";
+            }
+        }
+
+        private static float ClockToRadians(float clock)
+        {
+            return clock / 6.0f * MathF.PI;
+        }
+
+        private static Vector3 P4ClockPoint(Vector3 newTwelveDirection, float clock, float distance)
+        {
+            var rightVector = RightVectorFromNewTwelve(newTwelveDirection);
+            var radians = ClockToRadians(clock);
+            var direction = newTwelveDirection * MathF.Cos(radians) + rightVector * MathF.Sin(radians);
+            return P4ArenaCenter + direction * distance;
+        }
+
+        private static P4ClockDirection RoleDefaultClock(bool isThunder, int partyIndex)
+        {
+            if (IsTnPartyIndex(partyIndex))
+                return isThunder ? P4ClockDirection.Three : P4ClockDirection.Twelve;
+
+            if (IsDpsPartyIndex(partyIndex))
+                return isThunder ? P4ClockDirection.Nine : P4ClockDirection.Six;
+
+            return P4ClockDirection.Unknown;
+        }
+
+        private static float ClockDirectionToClock(P4ClockDirection clock)
+        {
+            switch (clock)
+            {
+                case P4ClockDirection.Twelve: return 0.0f;
+                case P4ClockDirection.Three: return 3.0f;
+                case P4ClockDirection.Six: return 6.0f;
+                case P4ClockDirection.Nine: return 9.0f;
+                default: return 0.0f;
             }
         }
 
@@ -1225,6 +1512,719 @@ namespace RyougiMioScriptNamespace
             });
         }
 
+        private void ScheduleP4LaterGroupsIfReady(ScriptAccessory accessory)
+        {
+            var generation = _generation;
+
+            lock (_p4Lock)
+            {
+                if (_p4BuffGroupsScheduled || _p4BuffGroupsScheduleQueued)
+                    return;
+
+                if (!_p4FourthDirectionReady || (_p4FourthXParam != 1121 && _p4FourthXParam != 1122))
+                    return;
+
+                if (BuildP4BuffGroupsLocked().Count < P4MaxScheduledGroupCount)
+                    return;
+
+                _p4BuffGroupsScheduleQueued = true;
+            }
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(500);
+                    FinalizeAndScheduleP4LaterGroups(accessory, generation);
+                }
+                catch (Exception ex)
+                {
+                    DebugEcho(accessory, $"P4GROUP queue fail {ex.Message}");
+                }
+            });
+        }
+
+        private void FinalizeAndScheduleP4LaterGroups(ScriptAccessory accessory, int generation)
+        {
+            var groups = new List<P4BuffGroup>();
+            lock (_p4Lock)
+            {
+                if (generation != _generation || _phase != Phase.P4)
+                    return;
+
+                if (_p4BuffGroupsScheduled)
+                    return;
+
+                groups = BuildP4BuffGroupsLocked();
+                if (groups.Count < P4MaxScheduledGroupCount)
+                {
+                    _p4BuffGroupsScheduleQueued = false;
+                    return;
+                }
+
+                _p4BuffGroups.Clear();
+                _p4BuffGroups.AddRange(groups);
+                _p4BuffGroupsScheduled = true;
+                _p4BuffGroupsScheduleQueued = false;
+            }
+
+            DebugEcho(accessory, $"P4GROUP ready {string.Join(" ", groups.Select(FormatP4GroupReadyDebug))}");
+            foreach (var group in groups)
+                ScheduleP4BuffGroup(accessory, generation, group);
+        }
+
+        private List<P4BuffGroup> BuildP4BuffGroupsLocked()
+        {
+            if (_p4FourthSnapshotAt <= 0)
+                return new List<P4BuffGroup>();
+
+            var snapshotAt = _p4FourthSnapshotAt;
+            var sorted = _p4BuffRecords
+                .Where(r => r.ExpiresAt > snapshotAt && TryGetP4BuffCategory(r.StatusId, out _))
+                .Select(r => new
+                {
+                    Record = r,
+                    SnapshotRemainingMs = (int)Math.Max(1L, r.ExpiresAt - snapshotAt),
+                })
+                .OrderBy(x => x.SnapshotRemainingMs)
+                .ThenBy(x => x.Record.StatusId)
+                .ThenBy(x => x.Record.PartyIndex)
+                .ToList();
+
+            var groups = new List<P4BuffGroup>();
+            foreach (var item in sorted)
+            {
+                var record = item.Record;
+                record.SnapshotRemainingMs = item.SnapshotRemainingMs;
+
+                var group = groups.FirstOrDefault(g =>
+                    Math.Abs(g.SnapshotRemainingMs - item.SnapshotRemainingMs) <= P4BuffGroupToleranceMs);
+                if (group == null)
+                {
+                    group = new P4BuffGroup
+                    {
+                        Category = TryGetP4BuffCategory(record.StatusId, out var category) ? category : P4BuffCategory.Mixed,
+                        DurationMs = record.DurationMs,
+                        SnapshotRemainingMs = item.SnapshotRemainingMs,
+                        ExpiresAt = snapshotAt + item.SnapshotRemainingMs,
+                    };
+                    groups.Add(group);
+                }
+
+                group.Records.Add(record);
+                group.DurationMs = (int)Math.Round(group.Records.Average(r => r.DurationMs));
+                group.SnapshotRemainingMs = (int)Math.Round(group.Records.Average(r => r.SnapshotRemainingMs));
+                group.ExpiresAt = snapshotAt + group.SnapshotRemainingMs;
+                group.Category = ResolveP4BuffGroupCategory(group.Records);
+            }
+
+            groups = groups
+                .OrderBy(g => g.SnapshotRemainingMs)
+                .Take(P4MaxScheduledGroupCount)
+                .ToList();
+            for (var i = 0; i < groups.Count; i++)
+                groups[i].Kind = (P4BuffGroupKind)(i + 1);
+
+            return groups;
+        }
+
+        private static P4BuffCategory ResolveP4BuffGroupCategory(IReadOnlyList<P4BuffRecord> records)
+        {
+            var categories = records
+                .Select(r => TryGetP4BuffCategory(r.StatusId, out var category) ? category : P4BuffCategory.Mixed)
+                .Distinct()
+                .ToList();
+
+            return categories.Count == 1 ? categories[0] : P4BuffCategory.Mixed;
+        }
+
+        private static string FormatP4GroupReadyDebug(P4BuffGroup group)
+        {
+            return $"{FormatP4BuffGroupKind(group.Kind)}:{group.Category}:{group.Records.Count} snap={FormatRemainingMs(group.SnapshotRemainingMs)} now={FormatRemainingMs(RemainingMs(group.ExpiresAt, NowMs()))} ids={FormatP4GroupStatusIds(group)} dur={FormatP4GroupDurations(group)}";
+        }
+
+        private static string FormatP4GroupStatusIds(P4BuffGroup group)
+        {
+            return string.Join(
+                "/",
+                group.Records
+                    .Select(r => r.StatusId)
+                    .Distinct()
+                    .OrderBy(id => id)
+                    .Select(P4BuffName));
+        }
+
+        private static string FormatP4GroupDurations(P4BuffGroup group)
+        {
+            var durations = group.Records
+                .Select(r => r.DurationMs)
+                .Where(ms => ms > 0)
+                .Distinct()
+                .OrderBy(ms => ms)
+                .Select(FormatRemainingMs)
+                .ToList();
+
+            return durations.Count > 0 ? string.Join("/", durations) : "-";
+        }
+
+        private void ScheduleP4BuffGroup(ScriptAccessory accessory, int generation, P4BuffGroup group)
+        {
+            var triggerRemainingMs = P4GroupTriggerRemainingMs(group.Kind);
+            if (triggerRemainingMs <= 0)
+                return;
+
+            var delayMs = (int)Math.Max(0L, group.ExpiresAt - NowMs() - triggerRemainingMs);
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(delayMs);
+                    if (generation != _generation || _phase != Phase.P4)
+                        return;
+
+                    ExecuteP4BuffGroup(accessory, generation, group.Kind);
+                }
+                catch (Exception ex)
+                {
+                    DebugEcho(accessory, $"P4GROUP {FormatP4BuffGroupKind(group.Kind)} delayed fail {ex.Message}");
+                }
+            });
+        }
+
+        private static int P4GroupTriggerRemainingMs(P4BuffGroupKind kind)
+        {
+            switch (kind)
+            {
+                case P4BuffGroupKind.A: return 6500;
+                case P4BuffGroupKind.B: return 4900;
+                case P4BuffGroupKind.C: return 6000;
+                case P4BuffGroupKind.D: return 8500;
+                case P4BuffGroupKind.E: return 5500;
+                case P4BuffGroupKind.F: return 4900;
+                default: return 0;
+            }
+        }
+
+        private void ExecuteP4BuffGroup(ScriptAccessory accessory, int generation, P4BuffGroupKind kind)
+        {
+            P4BuffGroup group = null;
+            Vector3 newTwelveDirection;
+            lock (_p4Lock)
+            {
+                group = _p4BuffGroups.FirstOrDefault(g => g.Kind == kind);
+                newTwelveDirection = _p4FourthDirectionReady ? _p4FourthNewTwelveDirection : DefaultNorth;
+                if (kind == P4BuffGroupKind.F)
+                    _p4FGroupStartedAt = NowMs();
+            }
+
+            if (group == null)
+            {
+                DebugEcho(accessory, $"P4GROUP {FormatP4BuffGroupKind(kind)} missing");
+                return;
+            }
+
+            DebugEcho(accessory, $"P4GROUP {FormatP4BuffGroupKind(kind)} fire records={FormatP4GroupRecords(group)}");
+
+            switch (kind)
+            {
+                case P4BuffGroupKind.A:
+                    ExecuteP4ThunderShareGroup(accessory, generation, group, newTwelveDirection, 8.0f, 4000, "P4_A", true, 0);
+                    break;
+                case P4BuffGroupKind.B:
+                    ExecuteP4PetrifyGroupB(accessory, group, newTwelveDirection);
+                    break;
+                case P4BuffGroupKind.C:
+                    ExecuteP4ElementGroup(accessory, group, newTwelveDirection, P4BuffGroupKind.C, 5500);
+                    break;
+                case P4BuffGroupKind.D:
+                    ExecuteP4GroupD(accessory, generation, group, newTwelveDirection);
+                    break;
+                case P4BuffGroupKind.E:
+                    ExecuteP4PetrifyGroupE(accessory, group, newTwelveDirection);
+                    break;
+                case P4BuffGroupKind.F:
+                    ExecuteP4ElementGroup(accessory, group, newTwelveDirection, P4BuffGroupKind.F, 4500);
+                    TryDrawP4FinalSafe(accessory, generation);
+                    break;
+            }
+        }
+
+        private static string FormatP4GroupRecords(P4BuffGroup group)
+        {
+            return string.Join(
+                " ",
+                group.Records
+                    .OrderBy(r => r.PartyIndex)
+                    .ThenBy(r => r.StatusId)
+                    .Select(r => $"{PartyPriorityLabel(r.PartyIndex)}:{P4BuffName(r.StatusId)}={r.State}/{FormatRemainingMs(RemainingMs(r.ExpiresAt, NowMs()))}"));
+        }
+
+        private bool TryGetP4ThunderState(IReadOnlyList<P4BuffRecord> records, int partyIndex, out bool isThunder)
+        {
+            isThunder = false;
+
+            var thunder = records.FirstOrDefault(r => r.PartyIndex == partyIndex && r.StatusId == 5544);
+            if (thunder != null)
+            {
+                if (thunder.State == P4StateTrue)
+                {
+                    isThunder = true;
+                    return true;
+                }
+
+                if (thunder.State == P4StateFalse)
+                {
+                    isThunder = false;
+                    return true;
+                }
+            }
+
+            var waterShare = records.FirstOrDefault(r => r.PartyIndex == partyIndex && r.StatusId == 5545);
+            if (waterShare != null)
+            {
+                if (waterShare.State == P4StateTrue)
+                {
+                    isThunder = false;
+                    return true;
+                }
+
+                if (waterShare.State == P4StateFalse)
+                {
+                    isThunder = true;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryGetP4AccelCall(IReadOnlyList<P4BuffRecord> records, int partyIndex, out string call)
+        {
+            call = null;
+            var accel = records.FirstOrDefault(r => r.PartyIndex == partyIndex && r.StatusId == 5546);
+            if (accel == null)
+                return false;
+
+            call = P4MoveCallText(accel.State);
+            return !string.IsNullOrWhiteSpace(call);
+        }
+
+        private void ExecuteP4ThunderShareGroup(
+            ScriptAccessory accessory,
+            int generation,
+            P4BuffGroup group,
+            Vector3 newTwelveDirection,
+            float distance,
+            int duration,
+            string drawName,
+            bool sendAccelParty,
+            int delay)
+        {
+            var records = group.Records;
+            var targets = new Vector3[8];
+            var marks = new MarkType?[8];
+            var thunderPlayers = new List<int>();
+            var partyMessages = new List<string>();
+
+            for (var i = 0; i < 8; i++)
+            {
+                var hasThunderState = TryGetP4ThunderState(records, i, out var isThunder);
+                if (isThunder)
+                    thunderPlayers.Add(i);
+
+                var clock = RoleDefaultClock(isThunder, i);
+                targets[i] = P4ClockPoint(newTwelveDirection, ClockDirectionToClock(clock), distance);
+
+                if (TryGetP4AccelCall(records, i, out var accelCall))
+                    partyMessages.Add($"{PartyPriorityLabel(i)}{PartyMemberJobName(accessory, i)}{accelCall}");
+
+                DebugEcho(accessory, $"P4{FormatP4BuffGroupKind(group.Kind)} MOVE {PartyPriorityLabel(i)} thunder={(hasThunderState ? isThunder.ToString() : "-")} accel={(TryGetP4AccelCall(records, i, out var c) ? c : "-")} clock={FormatP4Clock(clock)} target={FormatPosition(targets[i])}");
+            }
+
+            for (var i = 0; i < thunderPlayers.Count && i < 2; i++)
+                marks[thunderPlayers[i]] = i == 0 ? MarkType.Attack1 : MarkType.Attack2;
+
+            ApplyP4CommandMarksNoTimer(accessory, marks);
+            ScheduleP4CommandMarkClear(accessory, generation, 4000);
+
+            if (sendAccelParty)
+                SendP4PartyCalloutsSimple(accessory, partyMessages, generation);
+
+            var myIndex = GetMyIndex(accessory);
+            if (myIndex >= 0 && myIndex < 8)
+            {
+                var hasThunderState = TryGetP4ThunderState(records, myIndex, out var isThunder);
+                var parts = new List<string> { isThunder ? "钢铁" : "分摊" };
+                if (TryGetP4AccelCall(records, myIndex, out var accelCall))
+                    parts.Add(accelCall);
+                Alert(string.Join(" ", parts.Where(p => !string.IsNullOrWhiteSpace(p))));
+
+                if (hasThunderState || IsTnPartyIndex(myIndex) || IsDpsPartyIndex(myIndex))
+                    DrawP4SelfGuide(accessory, $"{DrawPrefix}_{drawName}_Guide", $"{DrawPrefix}_{drawName}_Target", targets[myIndex], duration, delay);
+            }
+        }
+
+        private void SendP4PartyCalloutsSimple(ScriptAccessory accessory, IReadOnlyList<string> messages, int generation)
+        {
+            if (!EnableCommandMode || messages == null || messages.Count == 0)
+                return;
+
+            Task.Run(async () =>
+            {
+                for (var i = 0; i < messages.Count; i++)
+                {
+                    if (generation != _generation || _phase != Phase.P4)
+                        return;
+
+                    accessory.Method.SendChat($"/p {messages[i]}");
+                    if (i + 1 < messages.Count)
+                        await Task.Delay(150);
+                }
+            });
+        }
+
+        private void DrawP4SelfGuide(ScriptAccessory accessory, string guideName, string targetName, Vector3 target, int duration, int delay = 0)
+        {
+            DrawGuide(accessory, guideName, target, duration, delay);
+            DrawStaticCircle(accessory, targetName, target, 0.25f, duration, GuideColor.V4);
+            if (delay <= 0)
+                GreenMoveToPoint(target, accessory, guideName);
+        }
+
+        private void ExecuteP4PetrifyGroupB(ScriptAccessory accessory, P4BuffGroup group, Vector3 newTwelveDirection)
+        {
+            var safeClocks = FindSafeCardinalClocks(newTwelveDirection);
+            ExecuteP4PetrifyGroup(accessory, group, newTwelveDirection, safeClocks[0], safeClocks[1], 4000, "P4_B");
+        }
+
+        private void ExecuteP4PetrifyGroupE(ScriptAccessory accessory, P4BuffGroup group, Vector3 newTwelveDirection)
+        {
+            ExecuteP4PetrifyGroup(accessory, group, newTwelveDirection, 0.0f, 6.0f, 5000, "P4_E");
+        }
+
+        private void ExecuteP4PetrifyGroup(ScriptAccessory accessory, P4BuffGroup group, Vector3 newTwelveDirection, float firstClock, float secondClock, int duration, string drawName)
+        {
+            var petrifies = group.Records
+                .Where(r => r.StatusId == 5543)
+                .OrderBy(r => r.PartyIndex)
+                .ToList();
+            var petrifySet = new HashSet<int>(petrifies.Select(r => r.PartyIndex));
+            var targets = new Vector3[8];
+            var marks = new MarkType?[8];
+
+            for (var i = 0; i < petrifies.Count && i < 2; i++)
+            {
+                var record = petrifies[i];
+                var clock = i == 0 ? firstClock : secondClock;
+                targets[record.PartyIndex] = P4ClockPoint(newTwelveDirection, clock, 3.0f);
+                marks[record.PartyIndex] = record.State == P4StateTrue
+                    ? (i == 0 ? MarkType.Stop1 : MarkType.Stop2)
+                    : (i == 0 ? MarkType.Bind1 : MarkType.Bind2);
+            }
+
+            var others = Enumerable.Range(0, 8)
+                .Where(i => !petrifySet.Contains(i))
+                .OrderBy(i => i)
+                .ToList();
+            for (var i = 0; i < others.Count; i++)
+            {
+                var clock = i < 3 ? firstClock : secondClock;
+                targets[others[i]] = P4ClockPoint(newTwelveDirection, clock, 7.0f);
+            }
+
+            ApplyP4CommandMarksNoTimer(accessory, marks);
+            ScheduleP4CommandMarkClear(accessory, _generation, 4000);
+
+            var myIndex = GetMyIndex(accessory);
+            var myPetrify = petrifies.FirstOrDefault(r => r.PartyIndex == myIndex);
+            if (myPetrify != null)
+                Alert(myPetrify.State == P4StateTrue ? "出去背对" : "出去正对");
+            else if (petrifies.Count > 0)
+                Alert(petrifies[0].State == P4StateTrue ? "背对" : "正对");
+
+            if (myIndex >= 0 && myIndex < 8)
+                DrawP4SelfGuide(accessory, $"{DrawPrefix}_{drawName}_Guide", $"{DrawPrefix}_{drawName}_Target", targets[myIndex], duration);
+
+            DebugEcho(accessory, $"P4{FormatP4BuffGroupKind(group.Kind)} PETRI safe={firstClock:F1}/{secondClock:F1} petrify={string.Join(",", petrifies.Select(r => $"{PartyPriorityLabel(r.PartyIndex)}:{r.State}"))}");
+        }
+
+        private void ExecuteP4ElementGroup(ScriptAccessory accessory, P4BuffGroup group, Vector3 newTwelveDirection, P4BuffGroupKind kind, int duration)
+        {
+            var call = ResolveP4ElementCallFromRecords(group.Records);
+            if (kind == P4BuffGroupKind.C)
+                _p4CElementCall = call;
+            if (kind == P4BuffGroupKind.F)
+                _p4FElementCall = call;
+
+            var text = call == P4ElementCall.FireSteel ? "场中集合钢铁" : call == P4ElementCall.WaterMoon ? "场中集合月环" : null;
+            if (!string.IsNullOrWhiteSpace(text))
+                QTTS(text);
+
+            DrawP4SelfGuide(accessory, $"{DrawPrefix}_P4_{FormatP4BuffGroupKind(kind)}_Center_Guide", $"{DrawPrefix}_P4_{FormatP4BuffGroupKind(kind)}_Center_Target", P4ArenaCenter, duration);
+            DebugEcho(accessory, $"P4{FormatP4BuffGroupKind(kind)} ELEM result={FormatP4ElementCall(call)} records={FormatP4GroupRecords(group)}");
+        }
+
+        private P4ElementCall ResolveP4ElementCallFromRecords(IReadOnlyList<P4BuffRecord> records)
+        {
+            var record = records
+                .Where(r => r.StatusId == 5547 || r.StatusId == 5548)
+                .OrderBy(r => r.PartyIndex)
+                .ThenBy(r => r.StatusId)
+                .FirstOrDefault();
+            if (record == null)
+                return P4ElementCall.Unknown;
+
+            if (record.StatusId == 5547)
+                return record.State == P4StateTrue ? P4ElementCall.FireSteel : P4ElementCall.WaterMoon;
+
+            return record.State == P4StateFalse ? P4ElementCall.FireSteel : P4ElementCall.WaterMoon;
+        }
+
+        private void ExecuteP4GroupD(ScriptAccessory accessory, int generation, P4BuffGroup group, Vector3 newTwelveDirection)
+        {
+            var startedAt = NowMs();
+            var firstDistance = _p4CElementCall == P4ElementCall.WaterMoon ? 3.0f : 8.0f;
+            ExecuteP4ThunderShareGroup(accessory, generation, group, newTwelveDirection, firstDistance, 5000, "P4_D_First", true, 0);
+
+            Task.Run(async () =>
+            {
+                await Task.Delay(5000);
+
+                var deadline = NowMs() + 1500;
+                while (NowMs() < deadline)
+                {
+                    if (generation != _generation || _phase != Phase.P4)
+                        return;
+
+                    if (CountP4Dangers(P4DangerShape.Fan, startedAt) >= 2)
+                        break;
+
+                    await Task.Delay(100);
+                }
+
+                if (generation != _generation || _phase != Phase.P4)
+                    return;
+
+                DrawP4GroupDSafe(accessory, group, newTwelveDirection, startedAt);
+            });
+        }
+
+        private void DrawP4GroupDSafe(ScriptAccessory accessory, P4BuffGroup group, Vector3 newTwelveDirection, long minCapturedAt)
+        {
+            var safeByRoleClock = FindSafeHalfClockByQuadrant(newTwelveDirection, minCapturedAt);
+            var myIndex = GetMyIndex(accessory);
+            if (myIndex < 0 || myIndex >= 8)
+                return;
+
+            TryGetP4ThunderState(group.Records, myIndex, out var isThunder);
+            var baseClock = ClockDirectionToClock(RoleDefaultClock(isThunder, myIndex));
+            var targetClock = safeByRoleClock.ContainsKey(baseClock) ? safeByRoleClock[baseClock] : baseClock;
+            var target = P4ClockPoint(newTwelveDirection, targetClock, 8.0f);
+            DrawP4SelfGuide(accessory, $"{DrawPrefix}_P4_D_Safe_Guide", $"{DrawPrefix}_P4_D_Safe_Target", target, 3000);
+            DebugEcho(accessory, $"P4D SAFE my={PartyPriorityLabel(myIndex)} base={baseClock:F1} safe={targetClock:F1} target={FormatPosition(target)}");
+        }
+
+        private int CountP4Dangers(P4DangerShape shape, long minCapturedAt)
+        {
+            lock (_p4Lock)
+            {
+                return _p4DangerRecords.Count(r => r.Shape == shape && r.CapturedAt >= minCapturedAt);
+            }
+        }
+
+        private List<P4DangerRecord> GetP4RecentDangers(P4DangerShape shape, int count, int lookbackMs, long minCapturedAt = 0)
+        {
+            var now = NowMs();
+            lock (_p4Lock)
+            {
+                return _p4DangerRecords
+                    .Where(r => r.Shape == shape
+                        && r.CapturedAt >= minCapturedAt
+                        && now - r.CapturedAt <= lookbackMs)
+                    .OrderByDescending(r => r.CapturedAt)
+                    .Take(count)
+                    .OrderBy(r => r.CapturedAt)
+                    .ToList();
+            }
+        }
+
+        private float[] FindSafeCardinalClocks(Vector3 newTwelveDirection)
+        {
+            var dangers = GetP4RecentDangers(P4DangerShape.Rect, 2, P4BRectLookbackMs);
+            var safe = P4CardinalClocks
+                .Where(clock =>
+                    IsPointSafeForDangers(P4ClockPoint(newTwelveDirection, clock, 3.0f), dangers)
+                    && IsPointSafeForDangers(P4ClockPoint(newTwelveDirection, clock, 7.0f), dangers))
+                .ToList();
+
+            if (safe.Count < 2)
+            {
+                if (_acc != null)
+                    DebugEcho(_acc, $"P4B SAFE fallback rects={dangers.Count} safe={string.Join(",", safe.Select(c => c.ToString("F1", CultureInfo.InvariantCulture)))}");
+
+                foreach (var clock in P4CardinalClocks)
+                {
+                    if (!safe.Contains(clock))
+                        safe.Add(clock);
+                    if (safe.Count >= 2)
+                        break;
+                }
+            }
+
+            return safe.Take(2).ToArray();
+        }
+
+        private Dictionary<float, float> FindSafeHalfClockByQuadrant(Vector3 newTwelveDirection, long minCapturedAt)
+        {
+            var dangers = GetP4RecentDangers(P4DangerShape.Fan, 2, P4DFanLookbackMs, minCapturedAt);
+            var result = new Dictionary<float, float>();
+            var candidates = new Dictionary<float, float[]>
+            {
+                { 0.0f, new[] { 11.5f, 12.5f } },
+                { 3.0f, new[] { 2.5f, 3.5f } },
+                { 6.0f, new[] { 5.5f, 6.5f } },
+                { 9.0f, new[] { 8.5f, 9.5f } },
+            };
+
+            foreach (var pair in candidates)
+            {
+                var safeClock = pair.Value.FirstOrDefault(clock =>
+                    IsPointSafeForDangers(P4ClockPoint(newTwelveDirection, clock, 8.0f), dangers));
+                result[pair.Key] = safeClock == 0.0f && pair.Key != 0.0f ? pair.Key : safeClock;
+            }
+
+            return result;
+        }
+
+        private bool TryDrawP4FinalSafe(ScriptAccessory accessory, int generation)
+        {
+            long startedAt;
+            Vector3 newTwelveDirection;
+            P4ElementCall call;
+            List<P4DangerRecord> dangers;
+
+            lock (_p4Lock)
+            {
+                if (_p4FGroupDangerDrawn || _p4FGroupStartedAt <= 0)
+                    return false;
+
+                startedAt = _p4FGroupStartedAt;
+                newTwelveDirection = _p4FourthDirectionReady ? _p4FourthNewTwelveDirection : DefaultNorth;
+                call = _p4FElementCall;
+                var rects = _p4DangerRecords
+                    .Where(r => r.Shape == P4DangerShape.Rect && r.CapturedAt >= startedAt)
+                    .OrderBy(r => r.CapturedAt)
+                    .Take(2)
+                    .ToList();
+                var fans = _p4DangerRecords
+                    .Where(r => r.Shape == P4DangerShape.Fan && r.CapturedAt >= startedAt)
+                    .OrderBy(r => r.CapturedAt)
+                    .Take(2)
+                    .ToList();
+
+                if (rects.Count < 2 || fans.Count < 2)
+                    return false;
+
+                dangers = rects.Concat(fans).ToList();
+            }
+
+            var finalQuadrants = new[]
+            {
+                new[] { 11.5f, 12.5f },
+                new[] { 2.5f, 3.5f },
+                new[] { 5.5f, 6.5f },
+                new[] { 8.5f, 9.5f },
+            };
+            var safeClocks = new List<float>();
+            foreach (var quadrant in finalQuadrants)
+            {
+                var safeClock = quadrant.FirstOrDefault(clock =>
+                    IsPointSafeForDangers(P4ClockPoint(newTwelveDirection, clock, 3.0f), dangers)
+                    && IsPointSafeForDangers(P4ClockPoint(newTwelveDirection, clock, 8.0f), dangers));
+                if (safeClock > 0.0f)
+                    safeClocks.Add(safeClock);
+                if (safeClocks.Count >= 2)
+                    break;
+            }
+
+            if (safeClocks.Count < 2)
+            {
+                DebugEcho(accessory, $"P4F FINAL no-safe dangers={FormatP4Dangers(dangers)} safe={string.Join(",", safeClocks.Select(c => c.ToString("F1", CultureInfo.InvariantCulture)))}");
+                return false;
+            }
+
+            lock (_p4Lock)
+            {
+                if (_p4FGroupDangerDrawn || generation != _generation || _phase != Phase.P4)
+                    return false;
+
+                _p4FGroupDangerDrawn = true;
+            }
+
+            var myIndex = GetMyIndex(accessory);
+            var distance = call == P4ElementCall.WaterMoon ? 3.0f : 8.0f;
+            if (myIndex >= 0 && myIndex < 8)
+            {
+                var targetClock = myIndex < 4 ? safeClocks[0] : safeClocks[1];
+                var target = P4ClockPoint(newTwelveDirection, targetClock, distance);
+                DrawP4SelfGuide(accessory, $"{DrawPrefix}_P4_F_Final_Guide", $"{DrawPrefix}_P4_F_Final_Target", target, 5000);
+                DebugEcho(accessory, $"P4F FINAL my={PartyPriorityLabel(myIndex)} clock={targetClock:F1} dist={distance:F1} target={FormatPosition(target)} call={FormatP4ElementCall(call)} dangers={FormatP4Dangers(dangers)}");
+            }
+
+            return true;
+        }
+
+        private static bool IsPointSafeForDangers(Vector3 point, IReadOnlyList<P4DangerRecord> dangers)
+        {
+            return dangers == null || dangers.All(danger => !IsPointInP4Danger(point, danger));
+        }
+
+        private static bool IsPointInP4Danger(Vector3 point, P4DangerRecord danger)
+        {
+            return danger.Shape == P4DangerShape.Rect
+                ? IsPointInP4RectDanger(point, danger)
+                : IsPointInP4FanDanger(point, danger);
+        }
+
+        private static bool IsPointInP4RectDanger(Vector3 point, P4DangerRecord danger)
+        {
+            var forward = new Vector3(MathF.Sin(danger.Rotation), 0.0f, MathF.Cos(danger.Rotation));
+            var right = new Vector3(forward.Z, 0.0f, -forward.X);
+            var delta = new Vector3(point.X - danger.Position.X, 0.0f, point.Z - danger.Position.Z);
+            var along = delta.X * forward.X + delta.Z * forward.Z;
+            var side = delta.X * right.X + delta.Z * right.Z;
+
+            return along >= -0.25f
+                && along <= P4RectDangerLength + 0.25f
+                && MathF.Abs(side) <= P4RectDangerWidth / 2.0f + 0.25f;
+        }
+
+        private static bool IsPointInP4FanDanger(Vector3 point, P4DangerRecord danger)
+        {
+            var delta = new Vector3(point.X - danger.Position.X, 0.0f, point.Z - danger.Position.Z);
+            var distance = MathF.Sqrt(delta.X * delta.X + delta.Z * delta.Z);
+            if (distance > P4FanDangerRadius + 0.25f)
+                return false;
+
+            if (distance < 0.001f)
+                return true;
+
+            var forward = new Vector3(MathF.Sin(danger.Rotation), 0.0f, MathF.Cos(danger.Rotation));
+            var dot = (delta.X * forward.X + delta.Z * forward.Z) / distance;
+            var limit = MathF.Cos(P4FanDangerRadian / 2.0f + 0.02f);
+            return dot >= limit;
+        }
+
+        private static string FormatP4Dangers(IReadOnlyList<P4DangerRecord> dangers)
+        {
+            if (dangers == null || dangers.Count == 0)
+                return "-";
+
+            return string.Join(
+                ",",
+                dangers.Select(d => $"{d.ActionId}/{d.Shape}@{FormatPosition(d.Position)}/{d.Rotation:F2}"));
+        }
+
         private static bool TryConvertToUInt(object value, out uint result)
         {
             result = 0;
@@ -1426,11 +2426,10 @@ namespace RyougiMioScriptNamespace
 
             for (var i = 0; i < 8; i++)
             {
-                TryResolveP4PlayerColor(states, i, out _, out var trueShapeStatus, out var trueColorStatus);
                 var objectId = i < accessory.Data.PartyList.Count ? accessory.Data.PartyList[i] : 0;
                 DebugEcho(
                     accessory,
-                    $"{PartyPriorityLabel(i)} {FormatObjectId(objectId)} {FormatP4StatusStates(states, i)} => {trueShapeStatus}/{trueColorStatus} {FormatP4Color(colors[i])} {FormatP4Side(sides[i])} mark={FormatP4Mark(marks[i])}");
+                    $"{PartyPriorityLabel(i)} {FormatObjectId(objectId)} => color={FormatP4Color(colors[i])} side={FormatP4Side(sides[i])} mark={FormatP4Mark(marks[i])}");
             }
         }
 
@@ -1595,16 +2594,16 @@ namespace RyougiMioScriptNamespace
         {
             if (!DeveloperMode) return;
 
-            DebugEcho(accessory, $"P4循环移动结算 round={round} new12={FormatPosition(newTwelveDirection)} ready={directionReady}");
+            DebugEcho(accessory, $"P4MOVE r={round} new12={FormatPosition(newTwelveDirection)} ready={directionReady}");
             for (var i = 0; i < 8; i++)
             {
                 var objectId = i < accessory.Data.PartyList.Count ? accessory.Data.PartyList[i] : 0;
+                var buffs = FormatP4StatusesWithRemaining(states, expiresAt, i, now, 5544, 5545, 5546);
                 DebugEcho(
                     accessory,
-                    $"{PartyPriorityLabel(i)} {FormatObjectId(objectId)} {FormatP4StatusStatesWithRemaining(states, expiresAt, i, now)} => clock={FormatP4Clock(clocks[i])} target={FormatPosition(targets[i])} 5546call={moveCalls[i] ?? "-"}({FormatRemainingMs(moveCallRemaining[i])}) mark={FormatP4Mark(marks[i])}");
+                    $"{PartyPriorityLabel(i)} {FormatObjectId(objectId)} {buffs} => clock={FormatP4Clock(clocks[i])} target={FormatPosition(targets[i])} call={moveCalls[i] ?? "-"}({FormatRemainingMs(moveCallRemaining[i])}) mark={FormatP4Mark(marks[i])}");
             }
         }
-
         private void DebugP4Petrify(
             ScriptAccessory accessory,
             int round,
@@ -1619,7 +2618,7 @@ namespace RyougiMioScriptNamespace
         {
             if (!DeveloperMode) return;
 
-            DebugEcho(accessory, $"P4石化观测 round={round} alertSource={PartyPriorityLabel(alertPartyIndex)} state={alertState} rem={FormatRemainingMs(alertRemaining)} text={alertText ?? "-"}");
+            DebugEcho(accessory, $"P4PETRI r={round} alert={PartyPriorityLabel(alertPartyIndex)} state={alertState}({FormatRemainingMs(alertRemaining)}) text={alertText ?? "-"}");
             for (var i = 0; i < 8; i++)
             {
                 TryGetP4ActiveSoonState(states, expiresAt, i, 5543, now, out var state5543, out var remaining5543);
@@ -1627,10 +2626,9 @@ namespace RyougiMioScriptNamespace
                 var objectId = i < accessory.Data.PartyList.Count ? accessory.Data.PartyList[i] : 0;
                 DebugEcho(
                     accessory,
-                    $"{PartyPriorityLabel(i)} {FormatObjectId(objectId)} {FormatP4StatusStatesWithRemaining(states, expiresAt, i, now)} => 5543={state5543}({FormatRemainingMs(remaining5543)}) call={call} mark={FormatP4Mark(marks[i])}");
+                    $"{PartyPriorityLabel(i)} {FormatObjectId(objectId)} {FormatP4StatusStateWithRemaining(states, expiresAt, i, 5543, now)} => active={state5543}({FormatRemainingMs(remaining5543)}) call={call} mark={FormatP4Mark(marks[i])}");
             }
         }
-
         private void DebugP4Element(
             ScriptAccessory accessory,
             int round,
@@ -1645,18 +2643,17 @@ namespace RyougiMioScriptNamespace
         {
             if (!DeveloperMode) return;
 
-            DebugEcho(accessory, $"P4火水观测 round={round} result={FormatP4ElementCall(call)} source={PartyPriorityLabel(partyIndex)} status={statusId} state={state} rem={FormatRemainingMs(remainingMs)}");
+            DebugEcho(accessory, $"P4ELEM r={round} result={FormatP4ElementCall(call)} src={PartyPriorityLabel(partyIndex)} id={statusId} state={state}({FormatRemainingMs(remainingMs)})");
             for (var i = 0; i < 8; i++)
             {
-                TryGetP4ActiveSoonState(states, expiresAt, i, 5547, now, out var state5547, out var remaining5547);
-                TryGetP4ActiveSoonState(states, expiresAt, i, 5548, now, out var state5548, out var remaining5548);
+                TryGetP4ActiveSoonState(states, expiresAt, i, 5547, now, out var active5547, out var activeRemaining5547);
+                TryGetP4ActiveSoonState(states, expiresAt, i, 5548, now, out var active5548, out var activeRemaining5548);
                 var objectId = i < accessory.Data.PartyList.Count ? accessory.Data.PartyList[i] : 0;
                 DebugEcho(
                     accessory,
-                    $"{PartyPriorityLabel(i)} {FormatObjectId(objectId)} {FormatP4StatusStatesWithRemaining(states, expiresAt, i, now)} => 5547={state5547}({FormatRemainingMs(remaining5547)}) 5548={state5548}({FormatRemainingMs(remaining5548)}) result={FormatP4ElementCall(call)}");
+                    $"{PartyPriorityLabel(i)} {FormatObjectId(objectId)} {FormatP4StatusesWithRemaining(states, expiresAt, i, now, 5547, 5548)} => active5547={active5547}({FormatRemainingMs(activeRemaining5547)}) active5548={active5548}({FormatRemainingMs(activeRemaining5548)})");
             }
         }
-
         #endregion
 
         #region GreenMove
@@ -1957,9 +2954,12 @@ namespace RyougiMioScriptNamespace
             if (!int.TryParse(@event["Param"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var param))
                 return;
 
+            if (!TryGetTargetDataId(@event, accessory, out var targetDataId))
+                return;
+
             var now = NowMs();
 
-            if (param == 1121 || param == 1122)
+            if (targetDataId == P4XDataId && (param == 1121 || param == 1122))
             {
                 var targetPosition = ResolveEventTargetPosition(@event, accessory);
                 var newTwelveDirection = DefaultNorth;
@@ -1976,13 +2976,14 @@ namespace RyougiMioScriptNamespace
                     if (_p4XEventCount == 4)
                     {
                         _p4FourthXParam = param;
+                        _p4FourthSnapshotAt = now;
                         _p4FourthTargetPosition = targetPosition;
                         _p4FourthNewTwelveDirection = directionReady ? newTwelveDirection : DefaultNorth;
                         _p4FourthDirectionReady = directionReady;
                     }
                 }
             }
-            else if (param == 1119 || param == 1120)
+            else if (targetDataId == P4CDataId && (param == 1119 || param == 1120))
             {
                 lock (_p4Lock)
                 {
@@ -1991,6 +2992,8 @@ namespace RyougiMioScriptNamespace
                     _p4CExpiresAt = now + P4StatusWindowMs;
                 }
             }
+
+            ScheduleP4LaterGroupsIfReady(accessory);
         }
 
         [ScriptMethod(name: "P4 状态变量赋值", eventType: EventTypeEnum.StatusAdd, eventCondition: ["StatusID:regex:^(554[1-8]|454|1382|4887|4888|5464)$"], userControl: false)]
@@ -2021,11 +3024,19 @@ namespace RyougiMioScriptNamespace
             var assignedState = P4StateUnknown;
             var xParam = 0;
             var cParam = 0;
+            var xExpiresAt = 0L;
+            var cExpiresAt = 0L;
             var xRemainingMs = 0;
             var cRemainingMs = 0;
             var xActive = false;
             var cActive = false;
-            TryGetSourceId(@event, out var sourceId);
+            var usedWindow = "-";
+            var usedParam = 0;
+            var usedWindowRemainingMs = 0;
+            var storedState = P4StateUnknown;
+            var storedRemainingMs = 0;
+            var chainRound = 0;
+            var chainStep = P4ChainStep.None;
 
             lock (_p4Lock)
             {
@@ -2037,8 +3048,29 @@ namespace RyougiMioScriptNamespace
                     _p4StatusStateByPartyAndStatus[partyIndex, statusIndex] = P4StateTrue;
                     assigned = true;
                     assignedState = P4StateTrue;
+                    usedWindow = "direct";
                 }
-                else if (TryGetActiveP4StateValueLocked(now, out var stateValue))
+                else if (IsP4ChainDebugStatus(statusId)
+                    && TryResolveP4LaterStateFromWindow(statusId, _p4XParam, _p4XExpiresAt, _p4CParam, _p4CExpiresAt, now, out var laterStateValue, out usedWindow, out usedParam, out usedWindowRemainingMs))
+                {
+                    _p4StatusStateByPartyAndStatus[partyIndex, statusIndex] = laterStateValue;
+                    assigned = true;
+                    assignedState = laterStateValue;
+
+                    if (hasDuration)
+                    {
+                        _p4BuffRecords.Add(new P4BuffRecord
+                        {
+                            PartyIndex = partyIndex,
+                            StatusId = statusId,
+                            State = laterStateValue,
+                            DurationMs = durationMs,
+                            ExpiresAt = now + durationMs,
+                        });
+                    }
+                }
+                else if (!IsP4ChainDebugStatus(statusId)
+                    && TryGetActiveP4StateValueLocked(now, out var stateValue, out usedWindow, out usedParam, out usedWindowRemainingMs))
                 {
                     _p4StatusStateByPartyAndStatus[partyIndex, statusIndex] = stateValue;
                     assigned = true;
@@ -2047,17 +3079,24 @@ namespace RyougiMioScriptNamespace
 
                 xParam = _p4XParam;
                 cParam = _p4CParam;
+                xExpiresAt = _p4XExpiresAt;
+                cExpiresAt = _p4CExpiresAt;
                 xRemainingMs = RemainingMs(_p4XExpiresAt, now);
                 cRemainingMs = RemainingMs(_p4CExpiresAt, now);
                 xActive = _p4XParam != 0 && xRemainingMs > 0;
                 cActive = _p4CParam != 0 && cRemainingMs > 0;
+                storedState = _p4StatusStateByPartyAndStatus[partyIndex, statusIndex];
+                storedRemainingMs = RemainingMs(_p4StatusExpiresAtByPartyAndStatus[partyIndex, statusIndex], now);
+                chainRound = _p4ChainRound;
+                chainStep = _p4ChainStep;
             }
 
-            if (statusId == 5541 || statusId == 5542 || statusId == 454 || statusId == 1382)
+            if (IsP4ChainDebugStatus(statusId))
             {
                 DebugEcho(
                     accessory,
-                    $"P4关键状态捕获 raw={rawStatusId} as={statusId} direct={directTrue} target={PartyPriorityLabel(partyIndex)} {FormatObjectId(targetId)} source={FormatObjectId(sourceId)} duration={(hasDuration ? durationMs.ToString(CultureInfo.InvariantCulture) : "-")}ms assigned={(assigned ? assignedState.ToString(CultureInfo.InvariantCulture) : "-")} x={xParam}/{FormatRemainingMs(xRemainingMs)}/{xActive} c={cParam}/{FormatRemainingMs(cRemainingMs)}/{cActive}");
+                    $"P4BUFF+ r={chainRound}/{chainStep} {PartyPriorityLabel(partyIndex)} {P4BuffName(statusId)} id={statusId} set={(assigned ? assignedState.ToString(CultureInfo.InvariantCulture) : "-")} now={storedState}({FormatRemainingMs(storedRemainingMs)}) dur={(hasDuration ? FormatRemainingMs(durationMs) : "-")} use={FormatP4UsedWindowDebug(usedWindow, usedParam, usedWindowRemainingMs)} {FormatP4WindowDebug("X", xParam, xRemainingMs, xActive)} {FormatP4WindowDebug("C", cParam, cRemainingMs, cActive)}");
+                ScheduleP4LaterGroupsIfReady(accessory);
             }
         }
 
@@ -2067,22 +3106,11 @@ namespace RyougiMioScriptNamespace
             _acc = accessory;
             if (_phase != Phase.P4) return;
 
-            if (!TryStartP4Chain(out var round, out var stepGeneration))
-                return;
-
-            var generation = _generation;
             accessory.Method.RemoveDraw($"{DrawPrefix}_P4_First_.*");
             ClearP4CommandMarksNow(accessory);
             GreenMoveStopAndClear(accessory, "P4 chain start");
-
-            ScheduleP4DelayedStep(
-                accessory,
-                generation,
-                stepGeneration,
-                round,
-                P4ChainStep.Move,
-                P4ChainDelayMs,
-                () => ExecuteP4ChainMove(accessory, generation, round));
+            DebugEcho(accessory, "P4 later timeline start by 50070");
+            ScheduleP4LaterGroupsIfReady(accessory);
         }
 
         [ScriptMethod(name: "P4 后续状态移除推进", eventType: EventTypeEnum.StatusRemove, eventCondition: ["StatusID:regex:^554[3-8]$"], userControl: false)]
@@ -2094,7 +3122,7 @@ namespace RyougiMioScriptNamespace
             if (!TryGetStatusId(@event, out var statusId))
                 return;
 
-            if (!TryGetP4TrackedStatusIndex(statusId, out _))
+            if (!TryGetP4TrackedStatusIndex(statusId, out var statusIndex))
                 return;
 
             if (!TryGetTargetId(@event, out var targetId))
@@ -2103,62 +3131,52 @@ namespace RyougiMioScriptNamespace
             var partyIndex = GetPlayerIndex(accessory, targetId);
             if (partyIndex < 0 || partyIndex >= 8)
                 return;
+        }
 
-            var generation = _generation;
+        [ScriptMethod(name: "P4 后续危险范围捕获", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(47777|47775|47768|47774)$"], userControl: false)]
+        public void P4_LaterDangerStartCasting(Event @event, ScriptAccessory accessory)
+        {
+            _acc = accessory;
+            if (_phase != Phase.P4) return;
 
-            if (statusId == 5544 || statusId == 5545)
+            if (!TryGetActionId(@event, out var actionId))
+                return;
+
+            P4DangerRecord record;
+            if (actionId == 47777 || actionId == 47775)
             {
-                if (!TryAdvanceP4ChainStep(P4ChainStep.Move, P4ChainStep.Petrify, out var round, out var stepGeneration))
-                    return;
-
-                accessory.Method.RemoveDraw($"{DrawPrefix}_P4_Chain_Move_.*");
-                ClearP4CommandMarksNow(accessory);
-                GreenMoveStopAndClear(accessory, "P4 move status removed");
-
-                ScheduleP4DelayedStep(
-                    accessory,
-                    generation,
-                    stepGeneration,
-                    round,
-                    P4ChainStep.Petrify,
-                    P4ChainDelayMs,
-                    () => ExecuteP4Petrify(accessory, round));
+                record = new P4DangerRecord
+                {
+                    ActionId = actionId,
+                    Shape = P4DangerShape.Rect,
+                    Position = @event.SourcePosition,
+                    Rotation = @event.SourceRotation,
+                    CapturedAt = NowMs(),
+                };
             }
-            else if (statusId == 5543)
+            else
             {
-                if (!TryAdvanceP4ChainStep(P4ChainStep.Petrify, P4ChainStep.Element, out var round, out var stepGeneration))
-                    return;
-
-                accessory.Method.RemoveDraw($"{DrawPrefix}_P4_Chain_.*");
-                ClearP4CommandMarksNow(accessory);
-                GreenMoveStopAndClear(accessory, "P4 petrify status removed");
-
-                ScheduleP4DelayedStep(
-                    accessory,
-                    generation,
-                    stepGeneration,
-                    round,
-                    P4ChainStep.Element,
-                    P4ChainDelayMs,
-                    () => ExecuteP4Element(accessory, round));
+                record = new P4DangerRecord
+                {
+                    ActionId = actionId,
+                    Shape = P4DangerShape.Fan,
+                    Position = P4ArenaCenter,
+                    Rotation = @event.SourceRotation,
+                    CapturedAt = NowMs(),
+                };
             }
-            else if (statusId == 5547 || statusId == 5548)
+
+            var shouldTryFinal = false;
+            lock (_p4Lock)
             {
-                if (!TryAdvanceP4ChainRound(out var round, out var stepGeneration))
-                    return;
-
-                accessory.Method.RemoveDraw($"{DrawPrefix}_P4_Chain_.*");
-                ClearP4CommandMarksNow(accessory);
-
-                ScheduleP4DelayedStep(
-                    accessory,
-                    generation,
-                    stepGeneration,
-                    round,
-                    P4ChainStep.Move,
-                    P4ChainDelayMs,
-                    () => ExecuteP4ChainMove(accessory, generation, round));
+                _p4DangerRecords.Add(record);
+                shouldTryFinal = _p4FGroupStartedAt > 0 && !_p4FGroupDangerDrawn;
             }
+
+            DebugEcho(accessory, $"P4DANGER+ id={actionId} shape={record.Shape} pos={FormatPosition(record.Position)} rot={record.Rotation:F3}");
+
+            if (shouldTryFinal)
+                TryDrawP4FinalSafe(accessory, _generation);
         }
 
         [ScriptMethod(name: "P4 一运半场指路", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:50069"], userControl: false)]
@@ -2235,7 +3253,7 @@ namespace RyougiMioScriptNamespace
                 }
                 else
                 {
-                    DebugEcho(accessory, $"P4一运指路未画：my={PartyPriorityLabel(myIndex)} side={FormatP4Side(mySide)} color={FormatP4Color(colors[myIndex])} states={FormatP4StatusStates(states, myIndex)}");
+                    DebugEcho(accessory, $"P4一运指路未画：my={PartyPriorityLabel(myIndex)} side={FormatP4Side(mySide)} color={FormatP4Color(colors[myIndex])}");
                 }
             }
             else
