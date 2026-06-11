@@ -18,7 +18,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.5", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击1234左 锁链123圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.6", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击1234左 锁链123圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class Script1363P4
     {
         #region Settings
@@ -1893,16 +1893,16 @@ namespace RyougiMioScriptNamespace
 
         private void ExecuteP4PetrifyGroupB(ScriptAccessory accessory, P4BuffGroup group, Vector3 newTwelveDirection)
         {
-            var safeClocks = FindSafeCardinalClocks(newTwelveDirection);
-            ExecuteP4PetrifyGroup(accessory, group, newTwelveDirection, safeClocks[0], safeClocks[1], 4000, "P4_B");
+            var safeClock = FindSafeNorthSouthClock(newTwelveDirection);
+            ExecuteP4PetrifyGroup(accessory, group, newTwelveDirection, safeClock, 4000, "P4_B");
         }
 
         private void ExecuteP4PetrifyGroupE(ScriptAccessory accessory, P4BuffGroup group, Vector3 newTwelveDirection)
         {
-            ExecuteP4PetrifyGroup(accessory, group, newTwelveDirection, 0.0f, 6.0f, 5000, "P4_E");
+            ExecuteP4PetrifyGroup(accessory, group, newTwelveDirection, 6.0f, 5000, "P4_E");
         }
 
-        private void ExecuteP4PetrifyGroup(ScriptAccessory accessory, P4BuffGroup group, Vector3 newTwelveDirection, float firstClock, float secondClock, int duration, string drawName)
+        private void ExecuteP4PetrifyGroup(ScriptAccessory accessory, P4BuffGroup group, Vector3 newTwelveDirection, float safeClock, int duration, string drawName)
         {
             var petrifies = group.Records
                 .Where(r => r.StatusId == 5543)
@@ -1915,8 +1915,8 @@ namespace RyougiMioScriptNamespace
             for (var i = 0; i < petrifies.Count && i < 2; i++)
             {
                 var record = petrifies[i];
-                var clock = i == 0 ? firstClock : secondClock;
-                targets[record.PartyIndex] = P4ClockPoint(newTwelveDirection, clock, 3.0f);
+                var distance = record.State == P4StateTrue ? 8.0f : record.State == P4StateFalse ? 3.0f : 6.0f;
+                targets[record.PartyIndex] = P4ClockPoint(newTwelveDirection, safeClock, distance);
                 marks[record.PartyIndex] = record.State == P4StateTrue
                     ? (i == 0 ? MarkType.Stop1 : MarkType.Stop2)
                     : (i == 0 ? MarkType.Bind1 : MarkType.Bind2);
@@ -1928,8 +1928,7 @@ namespace RyougiMioScriptNamespace
                 .ToList();
             for (var i = 0; i < others.Count; i++)
             {
-                var clock = i < 3 ? firstClock : secondClock;
-                targets[others[i]] = P4ClockPoint(newTwelveDirection, clock, 7.0f);
+                targets[others[i]] = P4ClockPoint(newTwelveDirection, safeClock, 6.0f);
             }
 
             ApplyP4CommandMarksNoTimer(accessory, marks);
@@ -1937,15 +1936,18 @@ namespace RyougiMioScriptNamespace
 
             var myIndex = GetMyIndex(accessory);
             var myPetrify = petrifies.FirstOrDefault(r => r.PartyIndex == myIndex);
+            var oldPetrifyAlertEnabled = false;
             if (myPetrify != null)
+                Alert(myPetrify.State == P4StateTrue ? "\u9762\u5411boss" : "\u4e92\u76f8\u9762\u5411");
+            if (oldPetrifyAlertEnabled && myPetrify != null)
                 Alert(myPetrify.State == P4StateTrue ? "出去背对" : "出去正对");
-            else if (petrifies.Count > 0)
+            else if (oldPetrifyAlertEnabled && petrifies.Count > 0)
                 Alert(petrifies[0].State == P4StateTrue ? "背对" : "正对");
 
             if (myIndex >= 0 && myIndex < 8)
                 DrawP4SelfGuide(accessory, $"{DrawPrefix}_{drawName}_Guide", $"{DrawPrefix}_{drawName}_Target", targets[myIndex], duration);
 
-            DebugEcho(accessory, $"P4{FormatP4BuffGroupKind(group.Kind)} PETRI safe={firstClock:F1}/{secondClock:F1} petrify={string.Join(",", petrifies.Select(r => $"{PartyPriorityLabel(r.PartyIndex)}:{r.State}"))}");
+            DebugEcho(accessory, $"P4{FormatP4BuffGroupKind(group.Kind)} PETRI safe={safeClock:F1} petrify={string.Join(",", petrifies.Select(r => $"{PartyPriorityLabel(r.PartyIndex)}:{r.State}/{(r.State == P4StateTrue ? "8m" : r.State == P4StateFalse ? "3m" : "6m")}"))} idle=6m");
         }
 
         private void ExecuteP4ElementGroup(ScriptAccessory accessory, P4BuffGroup group, Vector3 newTwelveDirection, P4BuffGroupKind kind, int duration)
@@ -2048,30 +2050,26 @@ namespace RyougiMioScriptNamespace
             }
         }
 
-        private float[] FindSafeCardinalClocks(Vector3 newTwelveDirection)
+        private float FindSafeNorthSouthClock(Vector3 newTwelveDirection)
         {
             var dangers = GetP4RecentDangers(P4DangerShape.Rect, 2, P4BRectLookbackMs);
-            var safe = P4CardinalClocks
+            var candidates = new[] { 0.0f, 6.0f };
+            var safe = candidates
                 .Where(clock =>
                     IsPointSafeForDangers(P4ClockPoint(newTwelveDirection, clock, 3.0f), dangers)
-                    && IsPointSafeForDangers(P4ClockPoint(newTwelveDirection, clock, 7.0f), dangers))
+                    && IsPointSafeForDangers(P4ClockPoint(newTwelveDirection, clock, 6.0f), dangers)
+                    && IsPointSafeForDangers(P4ClockPoint(newTwelveDirection, clock, 8.0f), dangers))
                 .ToList();
 
-            if (safe.Count < 2)
+            if (safe.Count <= 0)
             {
                 if (_acc != null)
                     DebugEcho(_acc, $"P4B SAFE fallback rects={dangers.Count} safe={string.Join(",", safe.Select(c => c.ToString("F1", CultureInfo.InvariantCulture)))}");
 
-                foreach (var clock in P4CardinalClocks)
-                {
-                    if (!safe.Contains(clock))
-                        safe.Add(clock);
-                    if (safe.Count >= 2)
-                        break;
-                }
+                return 0.0f;
             }
 
-            return safe.Take(2).ToArray();
+            return safe[0];
         }
 
         private Dictionary<float, float> FindSafeHalfClockByQuadrant(Vector3 newTwelveDirection, long minCapturedAt)
