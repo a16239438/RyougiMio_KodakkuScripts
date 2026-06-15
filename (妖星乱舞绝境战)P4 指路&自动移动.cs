@@ -18,7 +18,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.7", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击1234左 锁链123圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.9", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击12345678左 其他圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class Script1363P4
     {
         #region Settings
@@ -1830,7 +1830,10 @@ namespace RyougiMioScriptNamespace
             {
                 var hasThunderState = TryGetP4ThunderState(records, i, out var isThunder);
                 if (isThunder)
+                {
                     thunderPlayers.Add(i);
+                    partyMessages.Add($"{PartyPriorityLabel(i)}{PartyMemberJobName(accessory, i)}\u96f7\u5206\u6563");
+                }
 
                 var clock = RoleDefaultClock(isThunder, i);
                 targets[i] = P4ClockPoint(newTwelveDirection, ClockDirectionToClock(clock), distance);
@@ -1911,6 +1914,7 @@ namespace RyougiMioScriptNamespace
             var petrifySet = new HashSet<int>(petrifies.Select(r => r.PartyIndex));
             var targets = new Vector3[8];
             var marks = new MarkType?[8];
+            var partyMessages = new List<string>();
 
             for (var i = 0; i < petrifies.Count && i < 2; i++)
             {
@@ -1920,6 +1924,12 @@ namespace RyougiMioScriptNamespace
                 marks[record.PartyIndex] = record.State == P4StateTrue
                     ? (i == 0 ? MarkType.Stop1 : MarkType.Stop2)
                     : (i == 0 ? MarkType.Bind1 : MarkType.Bind2);
+
+                var petrifyCall = record.State == P4StateTrue
+                    ? "\u80cc\u5bf9"
+                    : record.State == P4StateFalse ? "\u6b63\u5bf9" : null;
+                if (!string.IsNullOrWhiteSpace(petrifyCall))
+                    partyMessages.Add($"{petrifyCall} {PartyPriorityLabel(record.PartyIndex)}{PartyMemberJobName(accessory, record.PartyIndex)}");
             }
 
             var others = Enumerable.Range(0, 8)
@@ -1933,6 +1943,7 @@ namespace RyougiMioScriptNamespace
 
             ApplyP4CommandMarksNoTimer(accessory, marks);
             ScheduleP4CommandMarkClear(accessory, _generation, 4000);
+            SendP4PartyCalloutsSimple(accessory, partyMessages, _generation);
 
             var myIndex = GetMyIndex(accessory);
             var myPetrify = petrifies.FirstOrDefault(r => r.PartyIndex == myIndex);
