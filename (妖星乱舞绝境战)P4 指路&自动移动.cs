@@ -18,7 +18,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.9", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击12345678左 其他圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.10", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击12345678左 其他圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class Script1363P4
     {
         #region Settings
@@ -1569,6 +1569,7 @@ namespace RyougiMioScriptNamespace
             }
 
             DebugEcho(accessory, $"P4GROUP ready {string.Join(" ", groups.Select(FormatP4GroupReadyDebug))}");
+            SendP4ThunderSharePlanSummaries(accessory, groups, generation);
             foreach (var group in groups)
                 ScheduleP4BuffGroup(accessory, generation, group);
         }
@@ -1728,7 +1729,7 @@ namespace RyougiMioScriptNamespace
             switch (kind)
             {
                 case P4BuffGroupKind.A:
-                    ExecuteP4ThunderShareGroup(accessory, generation, group, newTwelveDirection, 8.0f, 4000, "P4_A", true, 0);
+                    ExecuteP4ThunderShareGroup(accessory, generation, group, newTwelveDirection, 8.0f, 4000, "P4_A", false, 0);
                     break;
                 case P4BuffGroupKind.B:
                     ExecuteP4PetrifyGroupB(accessory, group, newTwelveDirection);
@@ -1807,6 +1808,54 @@ namespace RyougiMioScriptNamespace
 
             call = P4MoveCallText(accel.State);
             return !string.IsNullOrWhiteSpace(call);
+        }
+
+        private void SendP4ThunderSharePlanSummaries(ScriptAccessory accessory, IReadOnlyList<P4BuffGroup> groups, int generation)
+        {
+            if (!EnableCommandMode || groups == null)
+                return;
+
+            var messages = new List<string>();
+            AddP4ThunderSharePlanSummary(accessory, messages, groups.FirstOrDefault(g => g.Kind == P4BuffGroupKind.A), "\u7b2c\u4e00\u8f6e");
+            AddP4ThunderSharePlanSummary(accessory, messages, groups.FirstOrDefault(g => g.Kind == P4BuffGroupKind.D), "\u7b2c\u4e8c\u8f6e");
+            SendP4PartyCalloutsSimple(accessory, messages, generation);
+        }
+
+        private void AddP4ThunderSharePlanSummary(ScriptAccessory accessory, List<string> messages, P4BuffGroup group, string roundLabel)
+        {
+            if (messages == null || group == null)
+                return;
+
+            var accelParts = new List<string>();
+            var accelStop = new List<string>();
+            var accelMove = new List<string>();
+            var thunder = new List<string>();
+            var records = group.Records;
+
+            for (var i = 0; i < 8; i++)
+            {
+                var accel = records.FirstOrDefault(r => r.PartyIndex == i && r.StatusId == 5546);
+                if (accel != null)
+                {
+                    if (accel.State == P4StateTrue)
+                        accelStop.Add(PartyMemberJobName(accessory, i));
+                    else if (accel.State == P4StateFalse)
+                        accelMove.Add(PartyMemberJobName(accessory, i));
+                }
+
+                if (TryGetP4ThunderState(records, i, out var isThunder) && isThunder)
+                    thunder.Add(PartyMemberJobName(accessory, i));
+            }
+
+            if (accelMove.Count > 0)
+                accelParts.Add($"{string.Join("\uff0c", accelMove)} \u52a8\u52a8\u52a8");
+            if (accelStop.Count > 0)
+                accelParts.Add($"{string.Join("\uff0c", accelStop)} \u505c\u505c\u505c");
+
+            if (accelParts.Count > 0)
+                messages.Add($"{roundLabel}\uff1a{string.Join("    ", accelParts)}");
+            if (thunder.Count > 0)
+                messages.Add($"{roundLabel}\uff1a{string.Join(" ", thunder)} \u96f7\u5206\u6563");
         }
 
         private void ExecuteP4ThunderShareGroup(
@@ -1997,7 +2046,7 @@ namespace RyougiMioScriptNamespace
         {
             var startedAt = NowMs();
             var firstDistance = _p4CElementCall == P4ElementCall.WaterMoon ? 3.0f : 8.0f;
-            ExecuteP4ThunderShareGroup(accessory, generation, group, newTwelveDirection, firstDistance, 5000, "P4_D_First", true, 0);
+            ExecuteP4ThunderShareGroup(accessory, generation, group, newTwelveDirection, firstDistance, 5000, "P4_D_First", false, 0);
 
             Task.Run(async () =>
             {
