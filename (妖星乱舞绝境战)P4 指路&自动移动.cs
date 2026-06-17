@@ -18,7 +18,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.0.10", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击12345678左 其他圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.1.1", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击12345678左 其他圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class Script1363P4
     {
         #region Settings
@@ -34,6 +34,9 @@ namespace RyougiMioScriptNamespace
 
         [UserSetting("指挥模式（开启后允许脚本给全员上头标）")]
         public bool EnableCommandMode { get; set; } = false;
+
+        [UserSetting("P4真假预测播报(Off关闭 Echo默语 Party小队频道)")]
+        public P4PlanMessageMode PlanMessageMode { get; set; } = P4PlanMessageMode.Off;
 
         [UserSetting("启用PR GreenMove自动移动")]
         public bool EnableGreenMove { get; set; } = false;
@@ -77,6 +80,13 @@ namespace RyougiMioScriptNamespace
             Init,
             P4,
             Done,
+        }
+
+        public enum P4PlanMessageMode
+        {
+            Off,
+            Echo,
+            Party,
         }
 
         private enum P4HalfSide
@@ -1569,7 +1579,7 @@ namespace RyougiMioScriptNamespace
             }
 
             DebugEcho(accessory, $"P4GROUP ready {string.Join(" ", groups.Select(FormatP4GroupReadyDebug))}");
-            SendP4ThunderSharePlanSummaries(accessory, groups, generation);
+            SendP4GroupPlanSummaries(accessory, groups, generation);
             foreach (var group in groups)
                 ScheduleP4BuffGroup(accessory, generation, group);
         }
@@ -1810,15 +1820,44 @@ namespace RyougiMioScriptNamespace
             return !string.IsNullOrWhiteSpace(call);
         }
 
-        private void SendP4ThunderSharePlanSummaries(ScriptAccessory accessory, IReadOnlyList<P4BuffGroup> groups, int generation)
+        private void SendP4GroupPlanSummaries(ScriptAccessory accessory, IReadOnlyList<P4BuffGroup> groups, int generation)
         {
-            if (!EnableCommandMode || groups == null)
+            if (groups == null || PlanMessageMode == P4PlanMessageMode.Off)
                 return;
 
             var messages = new List<string>();
-            AddP4ThunderSharePlanSummary(accessory, messages, groups.FirstOrDefault(g => g.Kind == P4BuffGroupKind.A), "\u7b2c\u4e00\u8f6e");
-            AddP4ThunderSharePlanSummary(accessory, messages, groups.FirstOrDefault(g => g.Kind == P4BuffGroupKind.D), "\u7b2c\u4e8c\u8f6e");
-            SendP4PartyCalloutsSimple(accessory, messages, generation);
+            AddP4RoundPlanSummary(
+                accessory,
+                messages,
+                "\u7b2c\u4e00\u8f6e",
+                groups.FirstOrDefault(g => g.Kind == P4BuffGroupKind.A),
+                groups.FirstOrDefault(g => g.Kind == P4BuffGroupKind.B),
+                groups.FirstOrDefault(g => g.Kind == P4BuffGroupKind.C));
+            messages.Add("---------------");
+            AddP4RoundPlanSummary(
+                accessory,
+                messages,
+                "\u7b2c\u4e8c\u8f6e",
+                groups.FirstOrDefault(g => g.Kind == P4BuffGroupKind.D),
+                groups.FirstOrDefault(g => g.Kind == P4BuffGroupKind.E),
+                groups.FirstOrDefault(g => g.Kind == P4BuffGroupKind.F));
+            SendP4PlanMessages(accessory, messages, generation);
+        }
+
+        private void AddP4RoundPlanSummary(
+            ScriptAccessory accessory,
+            List<string> messages,
+            string roundLabel,
+            P4BuffGroup thunderGroup,
+            P4BuffGroup petrifyGroup,
+            P4BuffGroup elementGroup)
+        {
+            if (messages == null)
+                return;
+
+            AddP4ThunderSharePlanSummary(accessory, messages, thunderGroup, roundLabel);
+            AddP4PetrifyPlanSummary(accessory, messages, petrifyGroup, roundLabel);
+            AddP4ElementPlanSummary(messages, elementGroup, roundLabel);
         }
 
         private void AddP4ThunderSharePlanSummary(ScriptAccessory accessory, List<string> messages, P4BuffGroup group, string roundLabel)
@@ -1856,6 +1895,93 @@ namespace RyougiMioScriptNamespace
                 messages.Add($"{roundLabel}\uff1a{string.Join("    ", accelParts)}");
             if (thunder.Count > 0)
                 messages.Add($"{roundLabel}\uff1a{string.Join(" ", thunder)} \u96f7\u5206\u6563");
+        }
+
+        private void AddP4PetrifyPlanSummary(ScriptAccessory accessory, List<string> messages, P4BuffGroup group, string roundLabel)
+        {
+            if (messages == null || group == null)
+                return;
+
+            var faceOut = new List<string>();
+            var faceEachOther = new List<string>();
+            foreach (var record in group.Records.Where(r => r.StatusId == 5543).OrderBy(r => r.PartyIndex))
+            {
+                if (record.State == P4StateTrue)
+                    faceOut.Add(PartyMemberJobName(accessory, record.PartyIndex));
+                else if (record.State == P4StateFalse)
+                    faceEachOther.Add(PartyMemberJobName(accessory, record.PartyIndex));
+            }
+
+            if (faceOut.Count > 0)
+                messages.Add($"{roundLabel}\uff1a{string.Join(" ", faceOut)} \u80cc\u5bf9");
+            if (faceEachOther.Count > 0)
+                messages.Add($"{roundLabel}\uff1a{string.Join(" ", faceEachOther)} \u6b63\u5bf9");
+        }
+
+        private void AddP4ElementPlanSummary(List<string> messages, P4BuffGroup group, string roundLabel)
+        {
+            if (messages == null || group == null)
+                return;
+
+            var call = ResolveP4ElementCallFromRecords(group.Records);
+            if (call == P4ElementCall.FireSteel)
+                messages.Add($"{roundLabel}\uff1a\u5168\u4f53\u94a2\u94c1");
+            else if (call == P4ElementCall.WaterMoon)
+                messages.Add($"{roundLabel}\uff1a\u5168\u4f53\u6708\u73af");
+        }
+
+        private void SendP4PlanMessages(ScriptAccessory accessory, IReadOnlyList<string> messages, int generation)
+        {
+            if (messages == null || messages.Count == 0)
+                return;
+
+            switch (PlanMessageMode)
+            {
+                case P4PlanMessageMode.Party:
+                    SendP4PartyMessages(accessory, messages, generation);
+                    break;
+                case P4PlanMessageMode.Echo:
+                    SendP4EchoMessages(accessory, messages, generation);
+                    break;
+            }
+        }
+
+        private void SendP4PartyMessages(ScriptAccessory accessory, IReadOnlyList<string> messages, int generation)
+        {
+            if (messages == null || messages.Count == 0)
+                return;
+
+            Task.Run(async () =>
+            {
+                for (var i = 0; i < messages.Count; i++)
+                {
+                    if (generation != _generation || _phase != Phase.P4)
+                        return;
+
+                    accessory.Method.SendChat($"/p {messages[i]}");
+                    if (i + 1 < messages.Count)
+                        await Task.Delay(150);
+                }
+            });
+        }
+
+        private void SendP4EchoMessages(ScriptAccessory accessory, IReadOnlyList<string> messages, int generation)
+        {
+            if (messages == null || messages.Count == 0)
+                return;
+
+            Task.Run(async () =>
+            {
+                for (var i = 0; i < messages.Count; i++)
+                {
+                    if (generation != _generation || _phase != Phase.P4)
+                        return;
+
+                    accessory.Method.SendChat($"/e {messages[i]}");
+                    if (i + 1 < messages.Count)
+                        await Task.Delay(150);
+                }
+            });
         }
 
         private void ExecuteP4ThunderShareGroup(
@@ -1963,7 +2089,6 @@ namespace RyougiMioScriptNamespace
             var petrifySet = new HashSet<int>(petrifies.Select(r => r.PartyIndex));
             var targets = new Vector3[8];
             var marks = new MarkType?[8];
-            var partyMessages = new List<string>();
 
             for (var i = 0; i < petrifies.Count && i < 2; i++)
             {
@@ -1973,12 +2098,6 @@ namespace RyougiMioScriptNamespace
                 marks[record.PartyIndex] = record.State == P4StateTrue
                     ? (i == 0 ? MarkType.Stop1 : MarkType.Stop2)
                     : (i == 0 ? MarkType.Bind1 : MarkType.Bind2);
-
-                var petrifyCall = record.State == P4StateTrue
-                    ? "\u80cc\u5bf9"
-                    : record.State == P4StateFalse ? "\u6b63\u5bf9" : null;
-                if (!string.IsNullOrWhiteSpace(petrifyCall))
-                    partyMessages.Add($"{petrifyCall} {PartyPriorityLabel(record.PartyIndex)}{PartyMemberJobName(accessory, record.PartyIndex)}");
             }
 
             var others = Enumerable.Range(0, 8)
@@ -1992,7 +2111,6 @@ namespace RyougiMioScriptNamespace
 
             ApplyP4CommandMarksNoTimer(accessory, marks);
             ScheduleP4CommandMarkClear(accessory, _generation, 4000);
-            SendP4PartyCalloutsSimple(accessory, partyMessages, _generation);
 
             var myIndex = GetMyIndex(accessory);
             var myPetrify = petrifies.FirstOrDefault(r => r.PartyIndex == myIndex);
@@ -2382,8 +2500,47 @@ namespace RyougiMioScriptNamespace
         private static string PartyMemberJobName(ScriptAccessory accessory, int partyIndex)
         {
             return TryGetPartyMemberClassJobRowId(accessory, partyIndex, out var rowId)
-                ? JobChineseName(rowId)
+                ? JobShortName(rowId)
                 : "未知职业";
+        }
+
+        private static string JobShortName(uint classJobRowId)
+        {
+            switch (classJobRowId)
+            {
+                case 1: return "剑术";
+                case 2: return "格斗";
+                case 3: return "斧术";
+                case 4: return "枪术";
+                case 5: return "弓术";
+                case 6: return "幻术";
+                case 7: return "咒术";
+                case 19: return "骑士";
+                case 20: return "武僧";
+                case 21: return "战士";
+                case 22: return "龙骑";
+                case 23: return "诗人";
+                case 24: return "白魔";
+                case 25: return "黑魔";
+                case 26: return "秘术";
+                case 27: return "召唤";
+                case 28: return "学者";
+                case 29: return "双剑";
+                case 30: return "忍者";
+                case 31: return "机工";
+                case 32: return "暗骑";
+                case 33: return "占星";
+                case 34: return "武士";
+                case 35: return "赤魔";
+                case 36: return "青魔";
+                case 37: return "绝枪";
+                case 38: return "舞者";
+                case 39: return "钐镰";
+                case 40: return "贤者";
+                case 41: return "蝰蛇";
+                case 42: return "绘灵";
+                default: return "未知";
+            }
         }
 
         private static string JobChineseName(uint classJobRowId)
