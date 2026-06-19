@@ -18,7 +18,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.1.1", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击12345678左 其他圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.1.2", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击12345678左 其他圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class Script1363P4
     {
         #region Settings
@@ -32,8 +32,11 @@ namespace RyougiMioScriptNamespace
         [UserSetting("是否开启TTS语音提示")]
         public bool EnableTTS { get; set; } = true;
 
-        [UserSetting("指挥模式（开启后允许脚本给全员上头标）")]
-        public bool EnableCommandMode { get; set; } = false;
+        [UserSetting("鸳鸯锅标记")]
+        public bool EnableP4HotpotMarks { get; set; } = false;
+
+        [UserSetting("后续机制标记")]
+        public bool EnableP4LaterMarks { get; set; } = false;
 
         [UserSetting("P4真假预测播报(Off关闭 Echo默语 Party小队频道)")]
         public P4PlanMessageMode PlanMessageMode { get; set; } = P4PlanMessageMode.Off;
@@ -183,6 +186,7 @@ namespace RyougiMioScriptNamespace
 
         private const uint InvalidObjectId = 0xE0000000;
         private const uint P4StartActionId = 49884;
+        private const uint P4PurpleSourceActionId = 50068;
         private const uint P4ResolveActionId = 50069;
         private const uint P4ChainStartActionEffectId = 50070;
         private const uint P4TruthStatusId = 2056;
@@ -257,6 +261,11 @@ namespace RyougiMioScriptNamespace
         private Vector3 _p4FourthTargetPosition;
         private Vector3 _p4FourthNewTwelveDirection;
         private bool _p4FourthDirectionReady;
+        private Vector3 _p4HotpotBlueSourcePosition;
+        private Vector3 _p4HotpotPurpleSourcePosition;
+        private bool _p4HotpotBlueSourceReady;
+        private bool _p4HotpotPurpleSourceReady;
+        private bool _p4HotpotResolved;
         private object _greenMoveToPointSub;
         private MethodInfo _greenMoveToPointInvoke;
         private object _greenMoveClearQueueSub;
@@ -338,6 +347,11 @@ namespace RyougiMioScriptNamespace
                 _p4FourthTargetPosition = default;
                 _p4FourthNewTwelveDirection = DefaultNorth;
                 _p4FourthDirectionReady = false;
+                _p4HotpotBlueSourcePosition = default;
+                _p4HotpotPurpleSourcePosition = default;
+                _p4HotpotBlueSourceReady = false;
+                _p4HotpotPurpleSourceReady = false;
+                _p4HotpotResolved = false;
             }
         }
 
@@ -382,15 +396,17 @@ namespace RyougiMioScriptNamespace
             }
         }
 
+        private bool AnyP4MarksEnabled => EnableP4HotpotMarks || EnableP4LaterMarks;
+
         private void CommandMarkClear(ScriptAccessory accessory)
         {
-            if (!EnableCommandMode) return;
+            if (!AnyP4MarksEnabled) return;
             accessory.Method.MarkClear();
         }
 
         private void CommandMarkPartyMember(ScriptAccessory accessory, int partyIndex, MarkType markType)
         {
-            if (!EnableCommandMode) return;
+            if (!AnyP4MarksEnabled) return;
             if (partyIndex < 0 || partyIndex >= accessory.Data.PartyList.Count) return;
 
             accessory.Method.Mark(accessory.Data.PartyList[partyIndex], markType);
@@ -422,8 +438,6 @@ namespace RyougiMioScriptNamespace
 
         private void ScheduleP4CommandMarkClear(ScriptAccessory accessory, int generation, int durationMs)
         {
-            if (!EnableCommandMode) return;
-
             Timer timer = null;
             timer = new Timer(_ =>
             {
@@ -1270,9 +1284,9 @@ namespace RyougiMioScriptNamespace
             return marks;
         }
 
-        private void ApplyP4CommandMarksNoTimer(ScriptAccessory accessory, IReadOnlyList<MarkType?> marks)
+        private bool ApplyP4CommandMarksNoTimer(ScriptAccessory accessory, IReadOnlyList<MarkType?> marks)
         {
-            if (!EnableCommandMode) return;
+            if (!EnableP4LaterMarks) return false;
 
             ClearP4CommandMarksNow(accessory);
 
@@ -1282,6 +1296,8 @@ namespace RyougiMioScriptNamespace
                 if (marks[i].HasValue)
                     CommandMarkPartyMember(accessory, i, marks[i].Value);
             }
+
+            return true;
         }
 
         private static string P4MoveCallText(int state)
@@ -1492,7 +1508,7 @@ namespace RyougiMioScriptNamespace
 
         private void SendP4PartyCallouts(ScriptAccessory accessory, IReadOnlyList<string> messages, int generation, int round)
         {
-            if (!EnableCommandMode || messages == null || messages.Count == 0)
+            if (PlanMessageMode != P4PlanMessageMode.Party || messages == null || messages.Count == 0)
                 return;
 
             Task.Run(async () =>
@@ -2022,8 +2038,8 @@ namespace RyougiMioScriptNamespace
             for (var i = 0; i < thunderPlayers.Count && i < 2; i++)
                 marks[thunderPlayers[i]] = i == 0 ? MarkType.Attack1 : MarkType.Attack2;
 
-            ApplyP4CommandMarksNoTimer(accessory, marks);
-            ScheduleP4CommandMarkClear(accessory, generation, 4000);
+            if (ApplyP4CommandMarksNoTimer(accessory, marks))
+                ScheduleP4CommandMarkClear(accessory, generation, 4000);
 
             if (sendAccelParty)
                 SendP4PartyCalloutsSimple(accessory, partyMessages, generation);
@@ -2044,7 +2060,7 @@ namespace RyougiMioScriptNamespace
 
         private void SendP4PartyCalloutsSimple(ScriptAccessory accessory, IReadOnlyList<string> messages, int generation)
         {
-            if (!EnableCommandMode || messages == null || messages.Count == 0)
+            if (PlanMessageMode != P4PlanMessageMode.Party || messages == null || messages.Count == 0)
                 return;
 
             Task.Run(async () =>
@@ -2109,8 +2125,8 @@ namespace RyougiMioScriptNamespace
                 targets[others[i]] = P4ClockPoint(newTwelveDirection, safeClock, 6.0f);
             }
 
-            ApplyP4CommandMarksNoTimer(accessory, marks);
-            ScheduleP4CommandMarkClear(accessory, _generation, 4000);
+            if (ApplyP4CommandMarksNoTimer(accessory, marks))
+                ScheduleP4CommandMarkClear(accessory, _generation, 4000);
 
             var myIndex = GetMyIndex(accessory);
             var myPetrify = petrifies.FirstOrDefault(r => r.PartyIndex == myIndex);
@@ -2607,7 +2623,7 @@ namespace RyougiMioScriptNamespace
 
         private void ApplyP4CommandMarks(ScriptAccessory accessory, IReadOnlyList<MarkType?> marks)
         {
-            if (!EnableCommandMode) return;
+            if (!EnableP4HotpotMarks) return;
 
             CommandMarkClear(accessory);
 
@@ -3394,38 +3410,109 @@ namespace RyougiMioScriptNamespace
                 TryDrawP4FinalSafe(accessory, _generation);
         }
 
-        [ScriptMethod(name: "P4 一运半场指路", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:50069"], userControl: false)]
+        [ScriptMethod(name: "P4 一运半场指路", eventType: EventTypeEnum.StartCasting, eventCondition: ["ActionId:regex:^(50068|50069)$"], userControl: false)]
         public void P4_FirstMechanicGuide(Event @event, ScriptAccessory accessory)
         {
             _acc = accessory;
             if (_phase != Phase.P4) return;
 
+            if (!TryGetActionId(@event, out var actionId))
+                return;
+
             var states = new int[8, 10];
             int fourthParam;
+            int fourthCount;
+            long fourthSnapshotAt;
+            Vector3 fourthTargetPosition;
+            Vector3 blueSourcePosition;
+            Vector3 purpleSourcePosition;
             Vector3 newTwelveDirection;
+            Vector3 midpoint;
 
             lock (_p4Lock)
             {
-                fourthParam = _p4FourthXParam;
-                newTwelveDirection = _p4FourthNewTwelveDirection;
+                if (_p4HotpotResolved)
+                    return;
 
-                if ((fourthParam != 1121 && fourthParam != 1122) || !_p4FourthDirectionReady)
+                if (actionId == P4ResolveActionId)
                 {
-                    DebugEcho(accessory, $"P4一运结算跳过：第四次19510/2056未就绪 param={fourthParam} ready={_p4FourthDirectionReady} target={FormatPosition(_p4FourthTargetPosition)}");
+                    _p4HotpotBlueSourcePosition = @event.SourcePosition;
+                    _p4HotpotBlueSourceReady = true;
+                }
+                else if (actionId == P4PurpleSourceActionId)
+                {
+                    _p4HotpotPurpleSourcePosition = @event.SourcePosition;
+                    _p4HotpotPurpleSourceReady = true;
+                }
+                else
+                {
+                    return;
+                }
+
+                fourthParam = _p4FourthXParam;
+                fourthCount = _p4XEventCount;
+                fourthSnapshotAt = _p4FourthSnapshotAt;
+                fourthTargetPosition = _p4FourthTargetPosition;
+                blueSourcePosition = _p4HotpotBlueSourcePosition;
+                purpleSourcePosition = _p4HotpotPurpleSourcePosition;
+
+                if (!_p4HotpotBlueSourceReady || !_p4HotpotPurpleSourceReady)
+                {
+                    DebugEcho(
+                        accessory,
+                        $"P4HOTPOT WAIT action={actionId} blueReady={_p4HotpotBlueSourceReady} purpleReady={_p4HotpotPurpleSourceReady} blue50069={FormatPosition(_p4HotpotBlueSourcePosition)} purple50068={FormatPosition(_p4HotpotPurpleSourcePosition)}");
+                    return;
+                }
+
+                if (fourthParam != 1121 && fourthParam != 1122)
+                {
+                    DebugEcho(accessory, $"P4一运结算跳过：第四次19510/2056未就绪 param={fourthParam} target={FormatPosition(_p4FourthTargetPosition)}");
+                    return;
+                }
+
+                midpoint = new Vector3(
+                    (blueSourcePosition.X + purpleSourcePosition.X) * 0.5f,
+                    (blueSourcePosition.Y + purpleSourcePosition.Y) * 0.5f,
+                    (blueSourcePosition.Z + purpleSourcePosition.Z) * 0.5f);
+
+                if (!TryNormalizeFromCenter(midpoint, out newTwelveDirection))
+                {
+                    DebugEcho(accessory, $"P4一运结算跳过：50068/50069中点无效 blue50069={FormatPosition(blueSourcePosition)} purple50068={FormatPosition(purpleSourcePosition)} mid={FormatPosition(midpoint)}");
                     return;
                 }
 
                 Array.Copy(_p4StatusStateByPartyAndStatus, states, _p4StatusStateByPartyAndStatus.Length);
+                _p4HotpotResolved = true;
             }
 
             var rightVector = RightVectorFromNewTwelve(newTwelveDirection);
             var l1 = P4ArenaCenter - rightVector * P4GuideOffset;
             var r1 = P4ArenaCenter + rightVector * P4GuideOffset;
-            var sourceSide = SideOfPosition(@event.SourcePosition, rightVector);
-            var sourceSideColor = P4HalfColor.Blue;
-            var otherSideColor = OppositeColor(sourceSideColor);
-            var leftColor = sourceSide == P4HalfSide.Left ? sourceSideColor : otherSideColor;
-            var rightColor = sourceSide == P4HalfSide.Right ? sourceSideColor : otherSideColor;
+            var blueSide = SideOfPosition(blueSourcePosition, rightVector);
+            var purpleSide = SideOfPosition(purpleSourcePosition, rightVector);
+            var blueDelta = new Vector3(blueSourcePosition.X - P4ArenaCenter.X, 0.0f, blueSourcePosition.Z - P4ArenaCenter.Z);
+            var purpleDelta = new Vector3(purpleSourcePosition.X - P4ArenaCenter.X, 0.0f, purpleSourcePosition.Z - P4ArenaCenter.Z);
+            var blueDot = blueDelta.X * rightVector.X + blueDelta.Z * rightVector.Z;
+            var purpleDot = purpleDelta.X * rightVector.X + purpleDelta.Z * rightVector.Z;
+            var leftColor = blueSide == P4HalfSide.Left
+                ? P4HalfColor.Blue
+                : purpleSide == P4HalfSide.Left
+                    ? P4HalfColor.Purple
+                    : P4HalfColor.Unknown;
+            var rightColor = blueSide == P4HalfSide.Right
+                ? P4HalfColor.Blue
+                : purpleSide == P4HalfSide.Right
+                    ? P4HalfColor.Purple
+                    : P4HalfColor.Unknown;
+            if (leftColor == P4HalfColor.Unknown && rightColor != P4HalfColor.Unknown)
+                leftColor = OppositeColor(rightColor);
+            if (rightColor == P4HalfColor.Unknown && leftColor != P4HalfColor.Unknown)
+                rightColor = OppositeColor(leftColor);
+            var fourthAgeMs = fourthSnapshotAt > 0 ? NowMs() - fourthSnapshotAt : -1;
+
+            DebugEcho(
+                accessory,
+                $"P4HOTPOT DIAG xCount={fourthCount} fourthParam={fourthParam} fourthAge={fourthAgeMs}ms fourthTarget={FormatPosition(fourthTargetPosition)} blue50069={FormatPosition(blueSourcePosition)} purple50068={FormatPosition(purpleSourcePosition)} mid={FormatPosition(midpoint)} new12={FormatPosition(newTwelveDirection)} rightVec={FormatPosition(rightVector)} blueDot={blueDot:F3} purpleDot={purpleDot:F3} blueSide={FormatP4Side(blueSide)} purpleSide={FormatP4Side(purpleSide)} left={FormatP4Color(leftColor)} right={FormatP4Color(rightColor)}");
 
             var sides = new P4HalfSide[8];
             var colors = new P4HalfColor[8];
@@ -3476,7 +3563,7 @@ namespace RyougiMioScriptNamespace
                 DebugEcho(accessory, $"P4一运指路未画：myIndex={myIndex} partyCount={accessory.Data.PartyList.Count}");
             }
 
-            DebugP4Resolve(accessory, states, sides, colors, marks, fourthParam, sourceSide, leftColor, rightColor, newTwelveDirection, l1, r1);
+            DebugP4Resolve(accessory, states, sides, colors, marks, fourthParam, blueSide, leftColor, rightColor, newTwelveDirection, l1, r1);
         }
 
         #endregion
