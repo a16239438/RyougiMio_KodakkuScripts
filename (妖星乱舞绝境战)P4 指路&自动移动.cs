@@ -18,7 +18,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.1.2", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击12345678左 其他圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+    [ScriptType(name: "(妖星乱舞绝境战)P4 指路&自动移动", territorys: [1363], guid: "79ae48d3-c462-4e4a-8108-9eb507e131b2", version: "0.0.1.3", author: "RyougiMio", note: "P4脚本。\n鸳鸯锅:攻击12345678左 其他圈右\n后续:攻击12是钢铁 禁止12是背对 锁链12是正对\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class Script1363P4
     {
         #region Settings
@@ -196,6 +196,7 @@ namespace RyougiMioScriptNamespace
         private const int P4GuideDurationMs = 6000;
         private const int P4ChainGuideDurationMs = 8000;
         private const int P4ChainDelayMs = 500;
+        private const int P4LaterMarkApplyDelayMs = 300;
         private const int P4StateUnknown = 0;
         private const int P4StateTrue = 1;
         private const int P4StateFalse = 2;
@@ -240,6 +241,7 @@ namespace RyougiMioScriptNamespace
         private readonly List<P4DangerRecord> _p4DangerRecords = new List<P4DangerRecord>();
         private readonly object _p4DebugFileLock = new object();
         private Timer _p4CommandMarkClearTimer;
+        private int _p4LaterMarkApplyToken;
         private P4ChainStep _p4ChainStep = P4ChainStep.None;
         private int _p4ChainRound;
         private int _p4ChainStepGeneration;
@@ -256,6 +258,8 @@ namespace RyougiMioScriptNamespace
         private long _p4CExpiresAt;
         private long _p4CUpdatedAt;
         private int _p4XEventCount;
+        private int _p4GroupSnapshotParam;
+        private long _p4GroupSnapshotAt;
         private int _p4FourthXParam;
         private long _p4FourthSnapshotAt;
         private Vector3 _p4FourthTargetPosition;
@@ -314,6 +318,7 @@ namespace RyougiMioScriptNamespace
         private void ResetP4State()
         {
             CancelP4CommandMarkClearTimer();
+            CancelP4LaterCommandMarkApply();
 
             lock (_p4Lock)
             {
@@ -342,6 +347,8 @@ namespace RyougiMioScriptNamespace
                 _p4CExpiresAt = 0;
                 _p4CUpdatedAt = 0;
                 _p4XEventCount = 0;
+                _p4GroupSnapshotParam = 0;
+                _p4GroupSnapshotAt = 0;
                 _p4FourthXParam = 0;
                 _p4FourthSnapshotAt = 0;
                 _p4FourthTargetPosition = default;
@@ -415,7 +422,13 @@ namespace RyougiMioScriptNamespace
         private void ClearP4CommandMarksNow(ScriptAccessory accessory)
         {
             CancelP4CommandMarkClearTimer();
+            CancelP4LaterCommandMarkApply();
             CommandMarkClear(accessory);
+        }
+
+        private void CancelP4LaterCommandMarkApply()
+        {
+            Interlocked.Increment(ref _p4LaterMarkApplyToken);
         }
 
         private void CancelP4CommandMarkClearTimer()
@@ -1289,13 +1302,33 @@ namespace RyougiMioScriptNamespace
             if (!EnableP4LaterMarks) return false;
 
             ClearP4CommandMarksNow(accessory);
+            var token = Interlocked.Increment(ref _p4LaterMarkApplyToken);
+            var generation = _generation;
+            var markSnapshot = marks == null ? Array.Empty<MarkType?>() : marks.Take(8).ToArray();
 
-            var totalCount = Math.Min(marks.Count, accessory.Data.PartyList.Count);
-            for (var i = 0; i < totalCount; i++)
+            Task.Run(async () =>
             {
-                if (marks[i].HasValue)
-                    CommandMarkPartyMember(accessory, i, marks[i].Value);
-            }
+                try
+                {
+                    await Task.Delay(P4LaterMarkApplyDelayMs);
+                    if (!EnableP4LaterMarks
+                        || generation != _generation
+                        || _phase != Phase.P4
+                        || token != Volatile.Read(ref _p4LaterMarkApplyToken))
+                        return;
+
+                    var totalCount = Math.Min(markSnapshot.Length, accessory.Data.PartyList.Count);
+                    for (var i = 0; i < totalCount; i++)
+                    {
+                        if (markSnapshot[i].HasValue)
+                            CommandMarkPartyMember(accessory, i, markSnapshot[i].Value);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugEcho(accessory, $"P4 later mark delayed apply fail {ex.Message}");
+                }
+            });
 
             return true;
         }
@@ -1547,7 +1580,7 @@ namespace RyougiMioScriptNamespace
                 if (_p4BuffGroupsScheduled || _p4BuffGroupsScheduleQueued)
                     return;
 
-                if (!_p4FourthDirectionReady || (_p4FourthXParam != 1121 && _p4FourthXParam != 1122))
+                if (_p4GroupSnapshotAt <= 0 || (_p4GroupSnapshotParam != 1121 && _p4GroupSnapshotParam != 1122))
                     return;
 
                 if (BuildP4BuffGroupsLocked().Count < P4MaxScheduledGroupCount)
@@ -1602,10 +1635,10 @@ namespace RyougiMioScriptNamespace
 
         private List<P4BuffGroup> BuildP4BuffGroupsLocked()
         {
-            if (_p4FourthSnapshotAt <= 0)
+            if (_p4GroupSnapshotAt <= 0)
                 return new List<P4BuffGroup>();
 
-            var snapshotAt = _p4FourthSnapshotAt;
+            var snapshotAt = _p4GroupSnapshotAt;
             var sorted = _p4BuffRecords
                 .Where(r => r.ExpiresAt > snapshotAt && TryGetP4BuffCategory(r.StatusId, out _))
                 .Select(r => new
@@ -2039,7 +2072,7 @@ namespace RyougiMioScriptNamespace
                 marks[thunderPlayers[i]] = i == 0 ? MarkType.Attack1 : MarkType.Attack2;
 
             if (ApplyP4CommandMarksNoTimer(accessory, marks))
-                ScheduleP4CommandMarkClear(accessory, generation, 4000);
+                ScheduleP4CommandMarkClear(accessory, generation, P4LaterMarkApplyDelayMs + 4000);
 
             if (sendAccelParty)
                 SendP4PartyCalloutsSimple(accessory, partyMessages, generation);
@@ -2126,7 +2159,7 @@ namespace RyougiMioScriptNamespace
             }
 
             if (ApplyP4CommandMarksNoTimer(accessory, marks))
-                ScheduleP4CommandMarkClear(accessory, _generation, 4000);
+                ScheduleP4CommandMarkClear(accessory, _generation, P4LaterMarkApplyDelayMs + 4000);
 
             var myIndex = GetMyIndex(accessory);
             var myPetrify = petrifies.FirstOrDefault(r => r.PartyIndex == myIndex);
@@ -3203,6 +3236,12 @@ namespace RyougiMioScriptNamespace
                     _p4XUpdatedAt = now;
                     _p4XExpiresAt = now + P4StatusWindowMs;
                     _p4XEventCount++;
+
+                    if (_p4XEventCount == 3)
+                    {
+                        _p4GroupSnapshotParam = param;
+                        _p4GroupSnapshotAt = now;
+                    }
 
                     if (_p4XEventCount == 4)
                     {
