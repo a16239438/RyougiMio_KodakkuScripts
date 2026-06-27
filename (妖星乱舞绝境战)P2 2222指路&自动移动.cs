@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.11", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人 禁止1锁链1是靠近boss的 禁止2锁链2是远离boss的。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.13", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人 禁止1锁链1是靠近boss的 禁止2锁链2是远离boss的。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -84,8 +84,14 @@ namespace RyougiMioScriptNamespace
             A点,
         }
 
+        [UserSetting("P2第二轮按刷新头标重新分组")]
+        public bool RegroupOnRound2TargetIconRefresh { get; set; } = false;
+
         [UserSetting("Developer mode")]
         public bool DeveloperMode { get; set; } = false;
+
+        [UserSetting("开发模式：详细Debug日志")]
+        public bool VerboseDebugLog { get; set; } = false;
 
         [UserSetting("开发模式：记录读条ActionId")]
         public bool LogStartCastingActionId { get; set; } = false;
@@ -234,6 +240,7 @@ namespace RyougiMioScriptNamespace
         private readonly int[] _markerVariableOwnerByIndex = new int[8];
         private bool _targetIconGroupsResolved;
         private bool _activeTargetIconGroupsReady;
+        private bool _round2TargetIconRegroupDone;
 
         private readonly object _collectLock = new object();
         private readonly List<uint> _tetherTargets = new List<uint>();
@@ -372,6 +379,7 @@ namespace RyougiMioScriptNamespace
                 ClearRoundMarkerVariables();
                 _targetIconGroupsResolved = false;
                 _activeTargetIconGroupsReady = false;
+                _round2TargetIconRegroupDone = false;
             }
         }
 
@@ -395,7 +403,8 @@ namespace RyougiMioScriptNamespace
             out int round,
             out int firstIndex,
             out int secondIndex,
-            out int updateCount)
+            out int updateCount,
+            out List<int> targetIconUpdatePartyIndexes)
         {
             round = _pendingEnvBigCircleRoundToStart > 0
                 ? _pendingEnvBigCircleRoundToStart
@@ -403,6 +412,7 @@ namespace RyougiMioScriptNamespace
             firstIndex = _pendingEnvBigCircleFirstIndexToStart;
             secondIndex = _pendingEnvBigCircleSecondIndexToStart;
             updateCount = _pendingEnvBigCircleTargetIconUpdates.Count;
+            targetIconUpdatePartyIndexes = _pendingEnvBigCircleTargetIconUpdates.OrderBy(index => index).ToList();
 
             if (_pendingEnvBigCircleRoundToStart <= 0) return false;
             if (_pendingEnvBigCircleRoundToStart != EnvBigCircleLastRound && updateCount < EnvBigCircleTargetIconUpdateCount) return false;
@@ -443,12 +453,14 @@ namespace RyougiMioScriptNamespace
             out int round,
             out int firstIndex,
             out int secondIndex,
-            out int updateCount)
+            out int updateCount,
+            out List<int> targetIconUpdatePartyIndexes)
         {
             round = 0;
             firstIndex = 0;
             secondIndex = 0;
             updateCount = 0;
+            targetIconUpdatePartyIndexes = new List<int>();
 
             if (partyIndex < 0) return false;
 
@@ -457,7 +469,7 @@ namespace RyougiMioScriptNamespace
                 if (_envBigCircleRound <= 0) return false;
 
                 _pendingEnvBigCircleTargetIconUpdates.Add(partyIndex);
-                return TryStartCollectedEnvBigCircleRoundLocked(out round, out firstIndex, out secondIndex, out updateCount);
+                return TryStartCollectedEnvBigCircleRoundLocked(out round, out firstIndex, out secondIndex, out updateCount, out targetIconUpdatePartyIndexes);
             }
         }
 
@@ -561,6 +573,12 @@ namespace RyougiMioScriptNamespace
                 accessory.Method.SendChat($"/e [{DrawPrefix}] {message}");
         }
 
+        private void DebugTrace(ScriptAccessory accessory, string message)
+        {
+            if (VerboseDebugLog)
+                DebugEcho(accessory, message);
+        }
+
         private void GreenMoveToPoint(Vector3 target, ScriptAccessory accessory, string reason)
         {
             if (!EnableGreenMove) return;
@@ -581,7 +599,7 @@ namespace RyougiMioScriptNamespace
                     Math.Max(0, GreenMoveMaxCastWaitMs),
                     GreenMoveWaitForQueuedCast);
 
-                DebugEcho(accessory, $"GreenMove MoveToPoint {reason}: ({target.X:F2}, {target.Y:F2}, {target.Z:F2})");
+                DebugTrace(accessory, $"GreenMove MoveToPoint {reason}: ({target.X:F2}, {target.Y:F2}, {target.Z:F2})");
             }
             catch (Exception ex)
             {
@@ -597,7 +615,7 @@ namespace RyougiMioScriptNamespace
             {
                 GreenMoveClearQueue();
                 GreenMoveStop();
-                DebugEcho(accessory, $"GreenMove Stop/Clear {reason}");
+                DebugTrace(accessory, $"GreenMove Stop/Clear {reason}");
             }
             catch (Exception ex)
             {
@@ -816,7 +834,7 @@ namespace RyougiMioScriptNamespace
         {
             var generation = Interlocked.Increment(ref _roundCommandMarkGeneration);
             CancelCommandMarkClearTimer();
-            DebugEcho(accessory, $"{context}: command mark clear/wait assigned={assignedCount}/{totalCount} delay={delayMs}ms duration={durationMs}ms generation={generation}");
+            DebugTrace(accessory, $"{context}: command mark clear/wait assigned={assignedCount}/{totalCount} delay={delayMs}ms duration={durationMs}ms generation={generation}");
             CommandMarkClear(accessory);
             return generation;
         }
@@ -832,11 +850,11 @@ namespace RyougiMioScriptNamespace
                 {
                     if (generation != Volatile.Read(ref _roundCommandMarkGeneration))
                     {
-                        DebugEcho(accessory, $"{context}: command mark clear skipped, generation {generation}->{Volatile.Read(ref _roundCommandMarkGeneration)}");
+                        DebugTrace(accessory, $"{context}: command mark clear skipped, generation {generation}->{Volatile.Read(ref _roundCommandMarkGeneration)}");
                         return;
                     }
 
-                    DebugEcho(accessory, $"{context}: command mark duration expired, clear generation={generation}");
+                    DebugTrace(accessory, $"{context}: command mark duration expired, clear generation={generation}");
                     accessory.Method.MarkClear();
                 }
                 catch (Exception ex)
@@ -876,7 +894,7 @@ namespace RyougiMioScriptNamespace
         {
             if (!EnableCommandMode) return;
 
-            DebugEcho(accessory, $"Env big circle round {round}: command mark apply start assigned={roundMarks.Count(mark => mark.HasValue)}/{roundMarks.Count}");
+            DebugTrace(accessory, $"Env big circle round {round}: command mark apply start assigned={roundMarks.Count(mark => mark.HasValue)}/{roundMarks.Count}");
 
             for (var i = 0; i < roundMarks.Count; i++)
             {
@@ -886,21 +904,21 @@ namespace RyougiMioScriptNamespace
 
                 if (!roundMarks[i].HasValue)
                 {
-                    DebugEcho(accessory, $"Env big circle round {round}: command mark skip {PartyPriorityLabel(i)} no mark {FormatObjectId(objectId)}");
+                    DebugTrace(accessory, $"Env big circle round {round}: command mark skip {PartyPriorityLabel(i)} no mark {FormatObjectId(objectId)}");
                     continue;
                 }
 
                 if (i < 0 || i >= accessory.Data.PartyList.Count)
                 {
-                    DebugEcho(accessory, $"Env big circle round {round}: command mark skip {PartyPriorityLabel(i)} no party object");
+                    DebugTrace(accessory, $"Env big circle round {round}: command mark skip {PartyPriorityLabel(i)} no party object");
                     continue;
                 }
 
-                DebugEcho(accessory, $"Env big circle round {round}: command mark {PartyPriorityLabel(i)}={roundMarks[i].Value} {FormatObjectId(objectId)}");
+                DebugTrace(accessory, $"Env big circle round {round}: command mark {PartyPriorityLabel(i)}={roundMarks[i].Value} {FormatObjectId(objectId)}");
                 CommandMarkPartyMember(accessory, i, roundMarks[i].Value);
             }
 
-            DebugEcho(accessory, $"Env big circle round {round}: command mark apply done");
+            DebugTrace(accessory, $"Env big circle round {round}: command mark apply done");
         }
 
         private void CommandMarkRoundMarkersForDuration(ScriptAccessory accessory, int round, IReadOnlyList<MarkType?> roundMarks)
@@ -909,7 +927,7 @@ namespace RyougiMioScriptNamespace
             {
                 if (!EnableCommandMode)
                 {
-                    DebugEcho(accessory, $"Env big circle round {round}: command mark skipped, command mode disabled");
+                    DebugTrace(accessory, $"Env big circle round {round}: command mark skipped, command mode disabled");
                     return;
                 }
 
@@ -919,7 +937,7 @@ namespace RyougiMioScriptNamespace
                 var generation = BeginCommandMarkWait(accessory, context, roundMarksSnapshot.Count(mark => mark.HasValue), roundMarksSnapshot.Length, delayMs, durationMs);
                 if (durationMs <= 0)
                 {
-                    DebugEcho(accessory, $"{context}: command mark display duration is 0ms, apply skipped generation={generation}");
+                    DebugTrace(accessory, $"{context}: command mark display duration is 0ms, apply skipped generation={generation}");
                     return;
                 }
 
@@ -930,17 +948,17 @@ namespace RyougiMioScriptNamespace
                     {
                         if (!EnableCommandMode)
                         {
-                            DebugEcho(accessory, $"{context}: command mark apply skipped, command mode disabled");
+                            DebugTrace(accessory, $"{context}: command mark apply skipped, command mode disabled");
                             return;
                         }
 
                         if (generation != Volatile.Read(ref _roundCommandMarkGeneration))
                         {
-                            DebugEcho(accessory, $"{context}: command mark apply skipped, generation {generation}->{Volatile.Read(ref _roundCommandMarkGeneration)}");
+                            DebugTrace(accessory, $"{context}: command mark apply skipped, generation {generation}->{Volatile.Read(ref _roundCommandMarkGeneration)}");
                             return;
                         }
 
-                        DebugEcho(accessory, $"{context}: command mark wait done, apply duration={durationMs}ms generation={generation}");
+                        DebugTrace(accessory, $"{context}: command mark wait done, apply duration={durationMs}ms generation={generation}");
                         CommandMarkRoundMarkers(accessory, round, roundMarksSnapshot);
                         ScheduleCommandMarkClear(accessory, context, generation, durationMs);
                     }
@@ -1075,26 +1093,14 @@ namespace RyougiMioScriptNamespace
             return $"{PartyPriorityLabel(partyIndex)}:{FormatTargetIconId(_lastTargetIconByPartyIndex[partyIndex])}:{FormatObjectId(objectId)}";
         }
 
-        private bool TryResolveTargetIconGroupsLocked(ScriptAccessory accessory, out string group1Text, out string group2Text)
+        private string FormatTargetIconGroupText(ScriptAccessory accessory, IEnumerable<int> partyIndexes)
         {
-            group1Text = string.Empty;
-            group2Text = string.Empty;
+            return string.Join(", ", partyIndexes.OrderBy(index => index).Select(index => FormatPartyMember(accessory, index)));
+        }
 
-            if (_targetIconGroupsResolved) return false;
-            if (_lastTargetIconByPartyIndex.Any(iconId => iconId == 0)) return false;
-
-            var group1Set = new HashSet<int>();
-            foreach (var pair in TargetIconGroupPairs)
-            {
-                if (!pair.Any(index => _lastTargetIconByPartyIndex[index] == TargetIcon02CB))
-                    continue;
-
-                foreach (var index in pair)
-                    group1Set.Add(index);
-            }
-
-            if (group1Set.Count != 4)
-                return false;
+        private void SetTargetIconGroupsLocked(IEnumerable<int> group1Indexes)
+        {
+            var group1Set = new HashSet<int>(group1Indexes.Where(index => index >= 0 && index < _lastTargetIconByPartyIndex.Length));
 
             _targetIconGroup1.Clear();
             _targetIconGroup2.Clear();
@@ -1124,9 +1130,61 @@ namespace RyougiMioScriptNamespace
             _activeTargetIconGroup1.AddRange(_targetIconGroup1);
             _activeTargetIconGroup2.AddRange(_targetIconGroup2);
             _activeTargetIconGroupsReady = true;
-            group1Text = string.Join(", ", _targetIconGroup1.Select(index => FormatPartyMember(accessory, index)));
-            group2Text = string.Join(", ", _targetIconGroup2.Select(index => FormatPartyMember(accessory, index)));
+        }
+
+        private bool TryResolveTargetIconGroupsLocked(ScriptAccessory accessory, out string group1Text, out string group2Text)
+        {
+            group1Text = string.Empty;
+            group2Text = string.Empty;
+
+            if (_targetIconGroupsResolved) return false;
+            if (_lastTargetIconByPartyIndex.Any(iconId => iconId == 0)) return false;
+
+            var group1Set = new HashSet<int>();
+            foreach (var pair in TargetIconGroupPairs)
+            {
+                if (!pair.Any(index => _lastTargetIconByPartyIndex[index] == TargetIcon02CB))
+                    continue;
+
+                foreach (var index in pair)
+                    group1Set.Add(index);
+            }
+
+            if (group1Set.Count != 4)
+                return false;
+
+            SetTargetIconGroupsLocked(group1Set);
+            group1Text = FormatTargetIconGroupText(accessory, _targetIconGroup1);
+            group2Text = FormatTargetIconGroupText(accessory, _targetIconGroup2);
             return true;
+        }
+
+        private void TryRegroupRound2TargetIconGroupsLocked(ScriptAccessory accessory, IReadOnlyList<int> refreshedPartyIndexes)
+        {
+            if (!RegroupOnRound2TargetIconRefresh || _round2TargetIconRegroupDone)
+                return;
+
+            if (refreshedPartyIndexes == null)
+            {
+                DebugEcho(accessory, "TargetIcon groups regroup round 2 skipped: refreshed target icon list is missing.");
+                return;
+            }
+
+            var newGroup1 = refreshedPartyIndexes
+                .Where(index => index >= 0 && index < _lastTargetIconByPartyIndex.Length)
+                .Distinct()
+                .OrderBy(index => index)
+                .ToList();
+
+            if (newGroup1.Count != 4)
+            {
+                DebugEcho(accessory, $"TargetIcon groups regroup round 2 skipped: refreshed={string.Join(", ", newGroup1.Select(PartyPriorityLabel))} count={newGroup1.Count}/4.");
+                return;
+            }
+
+            SetTargetIconGroupsLocked(newGroup1);
+            _round2TargetIconRegroupDone = true;
+            DebugEcho(accessory, $"TargetIcon groups regrouped round 2: G1={FormatTargetIconGroupText(accessory, _targetIconGroup1)} | G2={FormatTargetIconGroupText(accessory, _targetIconGroup2)}");
         }
 
         private int FirstPartyIndexByIcon(IEnumerable<int> partyIndexes, uint iconId)
@@ -1313,12 +1371,12 @@ namespace RyougiMioScriptNamespace
             roundMarks = null;
             if (!_activeTargetIconGroupsReady) return false;
 
-            DebugEcho(accessory, $"Env big circle round {round}: round start");
+            DebugTrace(accessory, $"Env big circle round {round}: round start");
 
             if (round == 4 || round == 8)
             {
                 SwapActiveTargetIconGroupsLocked();
-                DebugEcho(accessory, $"Env big circle round {round}: active target icon groups swapped");
+                DebugTrace(accessory, $"Env big circle round {round}: active target icon groups swapped");
             }
 
             DebugStoredTargetIconRecords(accessory, round);
@@ -1355,7 +1413,7 @@ namespace RyougiMioScriptNamespace
                         ? _lastTargetIconByPartyIndex[partner]
                         : 0;
 
-                    DebugEcho(accessory, $"Env big circle round {round}: first G1 02CB pair check {PartyPriorityLabel(cb)} partner={PartyPriorityLabelOrNone(partner)}:{FormatTargetIconId(partnerIcon)}");
+                    DebugTrace(accessory, $"Env big circle round {round}: first G1 02CB pair check {PartyPriorityLabel(cb)} partner={PartyPriorityLabelOrNone(partner)}:{FormatTargetIconId(partnerIcon)}");
 
                     if (partnerIcon == TargetIcon02CD)
                     {
@@ -1408,7 +1466,7 @@ namespace RyougiMioScriptNamespace
                     previousRoundTwelveDirection,
                     9.0f);
 
-                DebugEcho(accessory, $"Env big circle round {round}: odd G1 02CB previous round near 9 order: {string.Join(", ", cbByNine.Select(index => FormatClockCloseness(accessory, index, previousRoundTwelveDirection, 9.0f)))}");
+                DebugTrace(accessory, $"Env big circle round {round}: odd G1 02CB previous round near 9 order: {string.Join(", ", cbByNine.Select(index => FormatClockCloseness(accessory, index, previousRoundTwelveDirection, 9.0f)))}");
 
                 AssignMarkerVariable(MarkType.Attack1, cbByNine.Count > 0 ? cbByNine[0] : -1);
                 AssignMarkerVariable(MarkType.Attack2, cd);
@@ -1425,7 +1483,7 @@ namespace RyougiMioScriptNamespace
                 var stopOrder = FanLeftSteelRightGroup2MembersByIcon(TargetIcon02CD, false);
                 var bindOrder = FanLeftSteelRightGroup2MembersByIcon(TargetIcon02CC, false);
 
-                DebugEcho(accessory, $"Env big circle round {round}: odd fan-left G2 priority Stop={string.Join(", ", stopOrder.Select(PartyPriorityLabel))} Bind={string.Join(", ", bindOrder.Select(PartyPriorityLabel))}");
+                DebugTrace(accessory, $"Env big circle round {round}: odd fan-left G2 priority Stop={string.Join(", ", stopOrder.Select(PartyPriorityLabel))} Bind={string.Join(", ", bindOrder.Select(PartyPriorityLabel))}");
                 AssignMarkerVariable(MarkType.Stop1, stopOrder.Count > 0 ? stopOrder[0] : -1);
                 AssignMarkerVariable(MarkType.Stop2, stopOrder.Count > 1 ? stopOrder[1] : -1);
                 AssignMarkerVariable(MarkType.Bind1, bindOrder.Count > 0 ? bindOrder[0] : -1);
@@ -1453,8 +1511,8 @@ namespace RyougiMioScriptNamespace
             if (!TryGetPreviousRoundNineOrder(accessory, round, group1Cc, out var group1CcByNine))
                 return false;
 
-            DebugEcho(accessory, $"Env big circle round {round}: even fan-left G1 02CD previous round near 9 order: {string.Join(", ", group1CdByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
-            DebugEcho(accessory, $"Env big circle round {round}: even fan-left G1 02CC previous round near 9 order: {string.Join(", ", group1CcByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
+            DebugTrace(accessory, $"Env big circle round {round}: even fan-left G1 02CD previous round near 9 order: {string.Join(", ", group1CdByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
+            DebugTrace(accessory, $"Env big circle round {round}: even fan-left G1 02CC previous round near 9 order: {string.Join(", ", group1CcByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
 
             AssignMarkerVariable(MarkType.Attack1, group1CdByNine.Count > 0 ? group1CdByNine[0] : -1);
             AssignMarkerVariable(MarkType.Attack2, group1CdByNine.Count > 1 ? group1CdByNine[1] : -1);
@@ -1466,7 +1524,7 @@ namespace RyougiMioScriptNamespace
             var stopOrder = FanLeftSteelRightGroup2MembersByIcon(TargetIcon02CD, useInitialGroup2Icon, reverseGroup2Priority);
             var bindOrder = FanLeftSteelRightGroup2MembersByIcon(TargetIcon02CC, useInitialGroup2Icon, reverseGroup2Priority);
 
-            DebugEcho(accessory, $"Env big circle round {round}: even fan-left G2 priority Stop={string.Join(", ", stopOrder.Select(PartyPriorityLabel))} Bind={string.Join(", ", bindOrder.Select(PartyPriorityLabel))} mode={EvenGroup2PrioritySetting} iconSource={(useInitialGroup2Icon ? "initialG2" : "current")}");
+            DebugTrace(accessory, $"Env big circle round {round}: even fan-left G2 priority Stop={string.Join(", ", stopOrder.Select(PartyPriorityLabel))} Bind={string.Join(", ", bindOrder.Select(PartyPriorityLabel))} mode={EvenGroup2PrioritySetting} iconSource={(useInitialGroup2Icon ? "initialG2" : "current")}");
             AssignMarkerVariable(MarkType.Stop1, stopOrder.Count > 0 ? stopOrder[0] : -1);
             AssignMarkerVariable(MarkType.Stop2, stopOrder.Count > 1 ? stopOrder[1] : -1);
             AssignMarkerVariable(MarkType.Bind1, bindOrder.Count > 0 ? bindOrder[0] : -1);
@@ -1485,8 +1543,8 @@ namespace RyougiMioScriptNamespace
             if (!TryGetPreviousRoundNineOrder(accessory, round, group1Cc, out var group1CcByNine))
                 return false;
 
-            DebugEcho(accessory, $"Env big circle round {round}: even G1 02CD previous round near 9 order: {string.Join(", ", group1CdByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
-            DebugEcho(accessory, $"Env big circle round {round}: even G1 02CC previous round near 9 order: {string.Join(", ", group1CcByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
+            DebugTrace(accessory, $"Env big circle round {round}: even G1 02CD previous round near 9 order: {string.Join(", ", group1CdByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
+            DebugTrace(accessory, $"Env big circle round {round}: even G1 02CC previous round near 9 order: {string.Join(", ", group1CcByNine.Select(index => FormatClockClosenessForPreviousRound(accessory, round, index, 9.0f)))}");
 
             AssignMarkerVariable(MarkType.Attack1, group1CdByNine.Count > 0 ? group1CdByNine[0] : -1);
             AssignMarkerVariable(MarkType.Attack2, group1CdByNine.Count > 1 ? group1CdByNine[1] : -1);
@@ -1821,34 +1879,28 @@ namespace RyougiMioScriptNamespace
             var secondHalf = Enumerable.Range(4, 4)
                 .Select(index => FormatStoredTargetIconRecord(accessory, index));
 
-            DebugEcho(accessory, $"Env big circle round {round}: stored targeticons 1/2: {string.Join(", ", firstHalf)}");
-            DebugEcho(accessory, $"Env big circle round {round}: stored targeticons 2/2: {string.Join(", ", secondHalf)}");
+            DebugTrace(accessory, $"Env big circle round {round}: stored targeticons 1/2: {string.Join(", ", firstHalf)}");
+            DebugTrace(accessory, $"Env big circle round {round}: stored targeticons 2/2: {string.Join(", ", secondHalf)}");
         }
 
-        private string FormatRoundMarkerAssignment(ScriptAccessory accessory, int partyIndex, IReadOnlyList<MarkType?> roundMarks, bool oddRound)
+        private string FormatRoundMarkerAssignment(int partyIndex, IReadOnlyList<MarkType?> roundMarks, bool oddRound)
         {
-            var objectId = partyIndex >= 0 && partyIndex < accessory.Data.PartyList.Count
-                ? accessory.Data.PartyList[partyIndex]
-                : 0;
-
             if (partyIndex < 0 || partyIndex >= roundMarks.Count || !roundMarks[partyIndex].HasValue)
-                return $"{PartyPriorityLabel(partyIndex)}=-:{FormatObjectId(objectId)}";
+                return null;
 
             var mark = roundMarks[partyIndex].Value;
             var alias = MarkerAliasForRoundMark(mark, oddRound);
-            return $"{PartyPriorityLabel(partyIndex)}={mark}->{alias}:{FormatObjectId(objectId)}";
+            return $"{PartyPriorityLabel(partyIndex)}={mark}({alias})";
         }
 
         private void DebugRoundMarkerAssignments(ScriptAccessory accessory, int round, IReadOnlyList<MarkType?> roundMarks)
         {
             var oddRound = round % 2 == 1;
-            var firstHalf = Enumerable.Range(0, 4)
-                .Select(index => FormatRoundMarkerAssignment(accessory, index, roundMarks, oddRound));
-            var secondHalf = Enumerable.Range(4, 4)
-                .Select(index => FormatRoundMarkerAssignment(accessory, index, roundMarks, oddRound));
+            var assignments = Enumerable.Range(0, roundMarks.Count)
+                .Select(index => FormatRoundMarkerAssignment(index, roundMarks, oddRound))
+                .Where(text => !string.IsNullOrWhiteSpace(text));
 
-            DebugEcho(accessory, $"Env big circle round {round}: headmarks 1/2: {string.Join(", ", firstHalf)}");
-            DebugEcho(accessory, $"Env big circle round {round}: headmarks 2/2: {string.Join(", ", secondHalf)}");
+            DebugEcho(accessory, $"Env big circle round {round}: headmarks {string.Join(", ", assignments)}");
         }
 
         private bool DrawEnvMarkerAlias(
@@ -1983,7 +2035,7 @@ namespace RyougiMioScriptNamespace
             DrawInactiveGuideBetweenPositions(accessory, $"{DrawPrefix}_EnvBigCircleRound_{round}_OE_Guide_{oeAlias}_To_{finalAlias}", oePosition, finalPosition, duration);
             SaveActiveOuterEdgeGuide(round, finalAlias, finalPosition, duration, true);
             GreenMoveToPoint(oePosition, accessory, $"round {round} {oeAlias}");
-            DebugEcho(accessory, $"Env big circle round {round}: outer edge relay {oeAlias}->{finalAlias}");
+            DebugTrace(accessory, $"Env big circle round {round}: outer edge relay {oeAlias}->{finalAlias}");
         }
 
         private void DrawOuterEdgeGuideOnly(
@@ -2007,7 +2059,7 @@ namespace RyougiMioScriptNamespace
             DrawGuide(accessory, $"{DrawPrefix}_EnvBigCircleRound_{round}_OE_Guide_To_{oeAlias}", oePosition, duration);
             SaveActiveOuterEdgeGuide(round, MarkerAlias.None, default, duration, false);
             GreenMoveToPoint(oePosition, accessory, $"round {round} {oeAlias}");
-            DebugEcho(accessory, $"Env big circle round {round}: outer edge guide {oeAlias}");
+            DebugTrace(accessory, $"Env big circle round {round}: outer edge guide {oeAlias}");
         }
 
         private void DrawLastRoundOuterEdgeInitialGuide(
@@ -2034,7 +2086,7 @@ namespace RyougiMioScriptNamespace
             DrawGuide(accessory, $"{DrawPrefix}_EnvBigCircleRound_{round}_OE_Guide_To_{oeAlias}", oePosition, duration);
             SaveActiveLastRoundOuterEdgeGuide(round, mode, newTwelveDirection, duration);
             GreenMoveToPoint(oePosition, accessory, $"round {round} {oeAlias}");
-            DebugEcho(accessory, $"Env big circle round {round}: last round outer edge initial guide {oeAlias} mode={mode}");
+            DebugTrace(accessory, $"Env big circle round {round}: last round outer edge initial guide {oeAlias} mode={mode}");
         }
 
         private void DrawLastRoundOuterEdgeResolveGuide(
@@ -2063,7 +2115,7 @@ namespace RyougiMioScriptNamespace
                 ScaleMode.None);
             DrawGuide(accessory, $"{DrawPrefix}_EnvBigCircleRound_{round}_OEResolve_Guide_To_{oeAlias}", oePosition, EnvBigCircleLastRoundResolveGuideDuration);
             GreenMoveToPoint(oePosition, accessory, $"round {round} {oeAlias} after {bossOuterEdgeActionId}");
-            DebugEcho(accessory, $"Boss cast {bossOuterEdgeActionId}: last round outer edge resolve guide {oeAlias} mode={mode}");
+            DebugTrace(accessory, $"Boss cast {bossOuterEdgeActionId}: last round outer edge resolve guide {oeAlias} mode={mode}");
         }
 
         private void SaveActiveOuterEdgeGuide(int round, MarkerAlias finalAlias, Vector3 finalPosition, int duration, bool hasFinalPosition)
@@ -2154,12 +2206,12 @@ namespace RyougiMioScriptNamespace
             {
                 DrawGuide(accessory, $"{DrawPrefix}_EnvBigCircleRound_{round}_Guide_{finalAlias}", finalPosition, duration);
                 GreenMoveToPoint(finalPosition, accessory, $"round {round} {finalAlias} after {actionId}");
-                DebugEcho(accessory, $"Boss cast {actionId}: outer edge guide resolved, direct guide={finalAlias}");
+                DebugTrace(accessory, $"Boss cast {actionId}: outer edge guide resolved, direct guide={finalAlias}");
             }
             else
             {
                 GreenMoveStopAndClear(accessory, $"after {actionId}");
-                DebugEcho(accessory, $"Boss cast {actionId}: outer edge guide resolved, no final guide");
+                DebugTrace(accessory, $"Boss cast {actionId}: outer edge guide resolved, no final guide");
             }
         }
 
@@ -2200,7 +2252,7 @@ namespace RyougiMioScriptNamespace
             return EnvBigCircleLastRoundStartDelayMs;
         }
 
-        private EnvBigCircleRoundPlan PrepareEnvBigCircleRoundPlan(ScriptAccessory accessory, int round, int firstIndex, int secondIndex)
+        private EnvBigCircleRoundPlan PrepareEnvBigCircleRoundPlan(ScriptAccessory accessory, int round, int firstIndex, int secondIndex, IReadOnlyList<int> roundTargetIconRefreshPartyIndexes)
         {
             var firstCenter = GetEnvBigCircleCenter(firstIndex);
             var secondCenter = GetEnvBigCircleCenter(secondIndex);
@@ -2211,7 +2263,12 @@ namespace RyougiMioScriptNamespace
             MarkType?[] roundMarks;
             var markersReady = false;
             lock (_targetIconLock)
+            {
+                if (round == 2)
+                    TryRegroupRound2TargetIconGroupsLocked(accessory, roundTargetIconRefreshPartyIndexes);
+
                 markersReady = PrepareRoundMarkerVariablesLocked(accessory, round, newTwelveDirection, out roundMarks);
+            }
 
             if (!markersReady || roundMarks == null)
             {
@@ -2256,15 +2313,15 @@ namespace RyougiMioScriptNamespace
                     else
                         GreenMoveToPoint(finalPosition, accessory, $"round {round} {alias}");
 
-                    DebugEcho(accessory, $"Env big circle round {round}: my marker={roundMarks[myIndex].Value} alias={alias}");
+                    DebugTrace(accessory, $"Env big circle round {round}: my marker={roundMarks[myIndex].Value} alias={alias}");
                 }
             }
             else
             {
-                DebugEcho(accessory, $"Env big circle round {round}: no marker for my index={myIndex}");
+                DebugTrace(accessory, $"Env big circle round {round}: no marker for my index={myIndex}");
             }
 
-            DebugEcho(accessory, $"Env big circle round {round}: indexes={plan.FirstIndex},{plan.SecondIndex} left={plan.LeftIndex} right={plan.RightIndex}");
+            DebugTrace(accessory, $"Env big circle round {round}: indexes={plan.FirstIndex},{plan.SecondIndex} left={plan.LeftIndex} right={plan.RightIndex}");
             CommandMarkRoundMarkersForDuration(accessory, round, roundMarks);
 
             if (round == EnvBigCircleLastRound)
@@ -2274,7 +2331,7 @@ namespace RyougiMioScriptNamespace
         private void ScheduleDelayedEnvBigCircleRoundPlan(ScriptAccessory accessory, EnvBigCircleRoundPlan plan, int delayMs)
         {
             var generation = _generation;
-            DebugEcho(accessory, $"Env big circle round {plan.Round}: delayed start {delayMs}ms");
+            DebugTrace(accessory, $"Env big circle round {plan.Round}: delayed start {delayMs}ms");
             Task.Run(async () =>
             {
                 try
@@ -2298,9 +2355,9 @@ namespace RyougiMioScriptNamespace
             });
         }
 
-        private void DrawEnvBigCircleRound(ScriptAccessory accessory, int round, int firstIndex, int secondIndex)
+        private void DrawEnvBigCircleRound(ScriptAccessory accessory, int round, int firstIndex, int secondIndex, IReadOnlyList<int> roundTargetIconRefreshPartyIndexes = null)
         {
-            var plan = PrepareEnvBigCircleRoundPlan(accessory, round, firstIndex, secondIndex);
+            var plan = PrepareEnvBigCircleRoundPlan(accessory, round, firstIndex, secondIndex, roundTargetIconRefreshPartyIndexes);
             if (plan == null)
                 return;
 
@@ -2471,7 +2528,7 @@ namespace RyougiMioScriptNamespace
             if (IsBossOuterEdgeAction(actionId))
             {
                 SetLastBossOuterEdgeActionId(actionId);
-                DebugEcho(accessory, $"Boss outer edge cast recorded: {actionId}->{OuterEdgeAlias(actionId)}");
+                DebugTrace(accessory, $"Boss outer edge cast recorded: {actionId}->{OuterEdgeAlias(actionId)}");
                 return;
             }
 
@@ -2505,32 +2562,30 @@ namespace RyougiMioScriptNamespace
             }
 
             if (DeveloperMode)
-                DebugEcho(accessory, $"TargetIcon P{index + 1}={FormatTargetIconId(iconId)} target={FormatObjectId(targetId)}");
+                DebugTrace(accessory, $"TargetIcon P{index + 1}={FormatTargetIconId(iconId)} target={FormatObjectId(targetId)}");
 
             if (groupsResolvedNow)
-            {
-                DebugEcho(accessory, $"TargetIcon groups fixed: G1={group1Text}");
-                DebugEcho(accessory, $"TargetIcon groups fixed: G2={group2Text}");
-            }
+                DebugEcho(accessory, $"TargetIcon groups fixed: G1={group1Text} | G2={group2Text}");
 
             var collectedReady = TryCollectTargetIconAndStartEnvBigCircleRound(
                 index,
                 out var collectedRound,
                 out var collectedFirstIndex,
                 out var collectedSecondIndex,
-                out var collectedUpdateCount);
+                out var collectedUpdateCount,
+                out var collectedTargetIconUpdatePartyIndexes);
 
             if (collectedUpdateCount > 0 && !collectedReady && DeveloperMode)
-                DebugEcho(accessory, $"Env big circle round {collectedRound}: target icons collected {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
+                DebugTrace(accessory, $"Env big circle round {collectedRound}: target icons collected {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
 
             if (collectedReady)
             {
                 if (collectedRound == EnvBigCircleLastRound && collectedUpdateCount < EnvBigCircleTargetIconUpdateCount)
-                    DebugEcho(accessory, $"Env big circle round {collectedRound}: big circles ready, no target icon refresh expected {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
+                    DebugTrace(accessory, $"Env big circle round {collectedRound}: big circles ready, no target icon refresh expected {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
                 else
-                    DebugEcho(accessory, $"Env big circle round {collectedRound}: target icons and big circles ready {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
+                    DebugTrace(accessory, $"Env big circle round {collectedRound}: target icons and big circles ready {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
 
-                DrawEnvBigCircleRound(accessory, collectedRound, collectedFirstIndex, collectedSecondIndex);
+                DrawEnvBigCircleRound(accessory, collectedRound, collectedFirstIndex, collectedSecondIndex, collectedTargetIconUpdatePartyIndexes);
             }
         }
 
@@ -2551,7 +2606,7 @@ namespace RyougiMioScriptNamespace
 
             if (!IsEnvBigCircleIndex(index) || flag != 2)
             {
-                DebugEcho(accessory, $"EnvControl index={index} flag={flag}");
+                DebugTrace(accessory, $"EnvControl index={index} flag={flag}");
                 return;
             }
 
@@ -2559,6 +2614,7 @@ namespace RyougiMioScriptNamespace
             int firstIndex = 0;
             int secondIndex = 0;
             int collectedUpdateCount = 0;
+            List<int> collectedTargetIconUpdatePartyIndexes = null;
             var startImmediately = false;
             var collectedReady = false;
             var waitForBothConditions = false;
@@ -2590,7 +2646,7 @@ namespace RyougiMioScriptNamespace
                     _pendingEnvBigCircleRoundToStart = _envBigCircleRound + 1;
                     _pendingEnvBigCircleFirstIndexToStart = firstIndex;
                     _pendingEnvBigCircleSecondIndexToStart = secondIndex;
-                    collectedReady = TryStartCollectedEnvBigCircleRoundLocked(out round, out firstIndex, out secondIndex, out collectedUpdateCount);
+                    collectedReady = TryStartCollectedEnvBigCircleRoundLocked(out round, out firstIndex, out secondIndex, out collectedUpdateCount, out collectedTargetIconUpdatePartyIndexes);
                     waitForBothConditions = !collectedReady;
                 }
             }
@@ -2602,18 +2658,18 @@ namespace RyougiMioScriptNamespace
             else if (collectedReady)
             {
                 if (round == EnvBigCircleLastRound && collectedUpdateCount < EnvBigCircleTargetIconUpdateCount)
-                    DebugEcho(accessory, $"Env big circle round {round}: big circles ready, no target icon refresh expected {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
+                    DebugTrace(accessory, $"Env big circle round {round}: big circles ready, no target icon refresh expected {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
                 else
-                    DebugEcho(accessory, $"Env big circle round {round}: target icons and big circles ready {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
+                    DebugTrace(accessory, $"Env big circle round {round}: target icons and big circles ready {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
 
-                DrawEnvBigCircleRound(accessory, round, firstIndex, secondIndex);
+                DrawEnvBigCircleRound(accessory, round, firstIndex, secondIndex, collectedTargetIconUpdatePartyIndexes);
             }
             else if (waitForBothConditions)
             {
-                DebugEcho(accessory, $"Env big circle round {round}: indexes={firstIndex},{secondIndex} waiting target icons {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
+                DebugTrace(accessory, $"Env big circle round {round}: indexes={firstIndex},{secondIndex} waiting target icons {collectedUpdateCount}/{EnvBigCircleTargetIconUpdateCount}");
             }
 
-            DebugEcho(accessory, $"EnvControl index={index} flag={flag}");
+            DebugTrace(accessory, $"EnvControl index={index} flag={flag}");
         }
 
         #endregion
