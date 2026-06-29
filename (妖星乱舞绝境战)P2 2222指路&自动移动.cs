@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.13", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人 禁止1锁链1是靠近boss的 禁止2锁链2是远离boss的。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.14", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人 禁止1锁链1是靠近boss的 禁止2锁链2是远离boss的。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -299,7 +299,8 @@ namespace RyougiMioScriptNamespace
             _acc = accessory;
             _phase = Phase.Init;
             _generation++;
-            StartDebugFileSession();
+            if (DeveloperMode)
+                StartDebugFileSession();
             ResetMechanicState();
             ResetTargetIconRecords();
 
@@ -312,7 +313,8 @@ namespace RyougiMioScriptNamespace
 
             accessory.Method.RemoveDraw(".*");
             CommandMarkClear(accessory);
-            DebugEcho(accessory, $"Debug file => {_debugLogFilePath}");
+            if (DeveloperMode)
+                DebugEcho(accessory, $"Debug file => {_debugLogFilePath}");
             DebugEcho(accessory, "New Duty Draft initialized.");
         }
 
@@ -523,6 +525,8 @@ namespace RyougiMioScriptNamespace
 
         private void AppendDebugFileLine(string message)
         {
+            if (!DeveloperMode) return;
+
             try
             {
                 EnsureDebugLogPath();
@@ -545,6 +549,8 @@ namespace RyougiMioScriptNamespace
 
         private void StartDebugFileSession()
         {
+            if (!DeveloperMode) return;
+
             try
             {
                 EnsureDebugLogPath();
