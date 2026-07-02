@@ -56,11 +56,11 @@
   {
     "Name": "(妖星乱舞绝境战)P2 2222指路&自动移动",
     "Guid": "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8",
-    "Version": "0.0.4.14",
+    "Version": "0.0.4.15",
     "Author": "RyougiMio",
     "TerritoryIds": [1363],
     "DownloadUrl": "https://raw.githubusercontent.com/a16239438/RyougiMio_KodakkuScripts/main/(妖星乱舞绝境战)P2%202222指路%26自动移动.cs",
-    "UpdateInfo": "增加了一个选项 可以用于在第二轮时按照实际情况重新计算指路"
+    "UpdateInfo": "测试修复标记丢失问题"
   }, 
   {
     "Name": "(妖星乱舞绝境战)P4 指路&自动移动",
