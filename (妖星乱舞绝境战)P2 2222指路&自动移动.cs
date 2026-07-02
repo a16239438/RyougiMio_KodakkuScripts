@@ -19,7 +19,7 @@ using KodakkuAssist.Script;
 
 namespace RyougiMioScriptNamespace
 {
-   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.14", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人 禁止1锁链1是靠近boss的 禁止2锁链2是远离boss的。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
+   [ScriptType(name: "(妖星乱舞绝境战)P2 2222指路&自动移动", territorys: [1363], guid: "4c8f82b2-ab7f-45dc-bff1-ffce01bc67c8", version: "0.0.4.15", author: "RyougiMio", note: "电！\n指挥模式：每轮前4.5秒不显示头标。\n每轮后4.5秒显示本轮攻击1~4、禁止1~2、锁链1~2。\n攻击1234是踩塔的4人从左往右顺，禁止12是左侧的2闲人，锁链12是右侧的的2闲人 禁止1锁链1是靠近boss的 禁止2锁链2是远离boss的。\n!!!!!!!!自动移动依赖于PromeRotation!!!!!!!!")]
     public class ScriptDraft
     {
         #region Settings
@@ -257,6 +257,7 @@ namespace RyougiMioScriptNamespace
         private int _pendingEnvBigCircleSecondIndexToStart;
         private int _roundCommandMarkGeneration;
         private readonly object _commandMarkTimerLock = new object();
+        private Timer _commandMarkApplyTimer;
         private Timer _commandMarkClearTimer;
         private readonly object _bossCastLock = new object();
         private uint _lastBossOuterEdgeActionId;
@@ -364,7 +365,7 @@ namespace RyougiMioScriptNamespace
             ClearActiveOuterEdgeGuideState();
 
             Interlocked.Increment(ref _roundCommandMarkGeneration);
-            CancelCommandMarkClearTimer();
+            CancelCommandMarkTimers();
         }
 
         private void ResetTargetIconRecords()
@@ -732,6 +733,26 @@ namespace RyougiMioScriptNamespace
                 ?? throw new InvalidOperationException("KodakkuAssist PluginInterface is null.");
         }
 
+        private void CancelCommandMarkTimers()
+        {
+            lock (_commandMarkTimerLock)
+            {
+                _commandMarkApplyTimer?.Dispose();
+                _commandMarkApplyTimer = null;
+                _commandMarkClearTimer?.Dispose();
+                _commandMarkClearTimer = null;
+            }
+        }
+
+        private void CancelCommandMarkApplyTimer()
+        {
+            lock (_commandMarkTimerLock)
+            {
+                _commandMarkApplyTimer?.Dispose();
+                _commandMarkApplyTimer = null;
+            }
+        }
+
         private void CancelCommandMarkClearTimer()
         {
             lock (_commandMarkTimerLock)
@@ -811,7 +832,16 @@ namespace RyougiMioScriptNamespace
                 : EnvLastRoundFixedOe5Position;
         }
 
-        private void ReplaceCommandMarkTimer(Timer timer)
+        private void ReplaceCommandMarkApplyTimer(Timer timer)
+        {
+            lock (_commandMarkTimerLock)
+            {
+                _commandMarkApplyTimer?.Dispose();
+                _commandMarkApplyTimer = timer;
+            }
+        }
+
+        private void ReplaceCommandMarkClearTimer(Timer timer)
         {
             lock (_commandMarkTimerLock)
             {
@@ -836,12 +866,29 @@ namespace RyougiMioScriptNamespace
             return (CommandMarkWindowMs - durationMs, durationMs);
         }
 
+        private void RunCommandMarkOnFrameworkThread(ScriptAccessory accessory, string context, System.Action action)
+        {
+            try
+            {
+                var task = accessory.Method.RunOnMainThreadAsync(action);
+                task?.ContinueWith(t =>
+                {
+                    var ex = t.Exception?.GetBaseException();
+                    if (ex != null)
+                        DebugEcho(accessory, $"{context}: command mark framework action failed: {ex.Message}");
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            catch (Exception ex)
+            {
+                DebugEcho(accessory, $"{context}: command mark framework action schedule failed: {ex.Message}");
+            }
+        }
+
         private int BeginCommandMarkWait(ScriptAccessory accessory, string context, int assignedCount, int totalCount, int delayMs, int durationMs)
         {
             var generation = Interlocked.Increment(ref _roundCommandMarkGeneration);
-            CancelCommandMarkClearTimer();
-            DebugTrace(accessory, $"{context}: command mark clear/wait assigned={assignedCount}/{totalCount} delay={delayMs}ms duration={durationMs}ms generation={generation}");
-            CommandMarkClear(accessory);
+            CancelCommandMarkApplyTimer();
+            DebugTrace(accessory, $"{context}: command mark wait assigned={assignedCount}/{totalCount} delay={delayMs}ms duration={durationMs}ms generation={generation}");
             return generation;
         }
 
@@ -849,23 +896,33 @@ namespace RyougiMioScriptNamespace
         {
             if (durationMs <= 0) return;
 
+            var mechanicGeneration = _generation;
             Timer timer = null;
             timer = new Timer(_ =>
             {
                 try
                 {
-                    if (generation != Volatile.Read(ref _roundCommandMarkGeneration))
+                    if (mechanicGeneration != _generation)
                     {
-                        DebugTrace(accessory, $"{context}: command mark clear skipped, generation {generation}->{Volatile.Read(ref _roundCommandMarkGeneration)}");
+                        DebugTrace(accessory, $"{context}: command mark clear skipped, mechanic generation {mechanicGeneration}->{_generation}");
                         return;
                     }
 
-                    DebugTrace(accessory, $"{context}: command mark duration expired, clear generation={generation}");
-                    accessory.Method.MarkClear();
+                    RunCommandMarkOnFrameworkThread(accessory, context, () =>
+                    {
+                        if (mechanicGeneration != _generation)
+                        {
+                            DebugTrace(accessory, $"{context}: command mark clear skipped on framework thread, mechanic generation {mechanicGeneration}->{_generation}");
+                            return;
+                        }
+
+                        DebugTrace(accessory, $"{context}: command mark duration expired, clear generation={generation}");
+                        accessory.Method.MarkClear();
+                    });
                 }
                 catch (Exception ex)
                 {
-                    DebugEcho(accessory, $"{context}: command mark duration clear failed: {ex.Message}");
+                    DebugEcho(accessory, $"{context}: command mark duration clear schedule failed: {ex.Message}");
                 }
                 finally
                 {
@@ -879,16 +936,20 @@ namespace RyougiMioScriptNamespace
                 }
             }, null, durationMs, Timeout.Infinite);
 
-            ReplaceCommandMarkTimer(timer);
+            ReplaceCommandMarkClearTimer(timer);
         }
 
-        private void CommandMarkClear(ScriptAccessory accessory)
+        private void CommandMarkClear(ScriptAccessory accessory, string context = "Command mark clear")
         {
             if (!EnableCommandMode) return;
-            accessory.Method.MarkClear();
+            RunCommandMarkOnFrameworkThread(accessory, context, () =>
+            {
+                if (!EnableCommandMode) return;
+                accessory.Method.MarkClear();
+            });
         }
 
-        private void CommandMarkPartyMember(ScriptAccessory accessory, int partyIndex, MarkType markType)
+        private void CommandMarkPartyMemberCore(ScriptAccessory accessory, int partyIndex, MarkType markType)
         {
             if (!EnableCommandMode) return;
             if (partyIndex < 0 || partyIndex >= accessory.Data.PartyList.Count) return;
@@ -896,7 +957,7 @@ namespace RyougiMioScriptNamespace
             accessory.Method.Mark(accessory.Data.PartyList[partyIndex], markType);
         }
 
-        private void CommandMarkRoundMarkers(ScriptAccessory accessory, int round, IReadOnlyList<MarkType?> roundMarks)
+        private void CommandMarkRoundMarkersCore(ScriptAccessory accessory, int round, IReadOnlyList<MarkType?> roundMarks)
         {
             if (!EnableCommandMode) return;
 
@@ -921,7 +982,7 @@ namespace RyougiMioScriptNamespace
                 }
 
                 DebugTrace(accessory, $"Env big circle round {round}: command mark {PartyPriorityLabel(i)}={roundMarks[i].Value} {FormatObjectId(objectId)}");
-                CommandMarkPartyMember(accessory, i, roundMarks[i].Value);
+                CommandMarkPartyMemberCore(accessory, i, roundMarks[i].Value);
             }
 
             DebugTrace(accessory, $"Env big circle round {round}: command mark apply done");
@@ -965,8 +1026,24 @@ namespace RyougiMioScriptNamespace
                         }
 
                         DebugTrace(accessory, $"{context}: command mark wait done, apply duration={durationMs}ms generation={generation}");
-                        CommandMarkRoundMarkers(accessory, round, roundMarksSnapshot);
-                        ScheduleCommandMarkClear(accessory, context, generation, durationMs);
+                        RunCommandMarkOnFrameworkThread(accessory, context, () =>
+                        {
+                            if (!EnableCommandMode)
+                            {
+                                DebugTrace(accessory, $"{context}: command mark apply skipped on framework thread, command mode disabled");
+                                return;
+                            }
+
+                            if (generation != Volatile.Read(ref _roundCommandMarkGeneration))
+                            {
+                                DebugTrace(accessory, $"{context}: command mark apply skipped on framework thread, generation {generation}->{Volatile.Read(ref _roundCommandMarkGeneration)}");
+                                return;
+                            }
+
+                            CancelCommandMarkClearTimer();
+                            CommandMarkRoundMarkersCore(accessory, round, roundMarksSnapshot);
+                            ScheduleCommandMarkClear(accessory, context, generation, durationMs);
+                        });
                     }
                     catch (Exception ex)
                     {
@@ -976,15 +1053,15 @@ namespace RyougiMioScriptNamespace
                     {
                         lock (_commandMarkTimerLock)
                         {
-                            if (ReferenceEquals(_commandMarkClearTimer, timer))
-                                _commandMarkClearTimer = null;
+                            if (ReferenceEquals(_commandMarkApplyTimer, timer))
+                                _commandMarkApplyTimer = null;
                         }
 
                         timer?.Dispose();
                     }
                 }, null, delayMs, Timeout.Infinite);
 
-                ReplaceCommandMarkTimer(timer);
+                ReplaceCommandMarkApplyTimer(timer);
             }
             catch (Exception ex)
             {
@@ -2571,7 +2648,10 @@ namespace RyougiMioScriptNamespace
                 DebugTrace(accessory, $"TargetIcon P{index + 1}={FormatTargetIconId(iconId)} target={FormatObjectId(targetId)}");
 
             if (groupsResolvedNow)
+            {
                 DebugEcho(accessory, $"TargetIcon groups fixed: G1={group1Text} | G2={group2Text}");
+                CommandMarkClear(accessory, "TargetIcon groups fixed");
+            }
 
             var collectedReady = TryCollectTargetIconAndStartEnvBigCircleRound(
                 index,
